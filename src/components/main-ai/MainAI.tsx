@@ -4,18 +4,44 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router"
 import { ArrowLeft } from "lucide-react"
 import { MainAIChatWindow } from "./MainAIChatWindow"
 import {
-  isHomeScenarioZeroNoOrg,
-  isScenarioFiveLike,
-  isMainEntryScenario,
+  eduScenarioRole,
   isCuiCardRulesScenario,
+  isEduRoleScenario,
+  isHomeScenarioZeroNoOrg,
+  isMainEntryScenario,
+  isScenarioFiveLike,
   isScenarioTwoFamily,
   isSingleOrgEduAttendanceScenarioFlow,
   SCENARIO_CUI_CARD_RULES,
+  SCENARIO_EDU_ADMIN,
+  SCENARIO_EDU_PARENT,
+  SCENARIO_EDU_STUDENT,
+  SCENARIO_EDU_TEACHER,
   SCENARIO_TWO_MULTI_ORGS,
+  type EduSceneRole,
 } from "./homeScenarioLayout"
-import { MAIN_CUI_GUIDE_GREETING, SCENARIO_ZERO_MAIN_CUI_GUIDE_GREETING } from "./mainCuiGuideGreeting"
+import {
+  buildMainVvaiStandardWelcomePlainText,
+  MAIN_CUI_GUIDE_GREETING,
+  SCENARIO_ZERO_MAIN_CUI_GUIDE_GREETING,
+} from "./mainCuiGuideGreeting"
 import { demoFollowUpPrompts } from "./cuiCardRulesDemo"
 import { ThemeToggle } from "./ThemeToggle"
+import { EducationStageSwitcher } from "./EducationStageSwitcher"
+import { LessonDeliveryModeSwitcher } from "./LessonDeliveryModeSwitcher"
+import { AiClassroomLiveWindow } from "./AiClassroomLiveWindow"
+import { DEMO_LESSON } from "./aiClassroomLessonDemo"
+import { findLessonSummary } from "./aiClassroomLessonsDemo"
+import {
+  loadDemoEducationStage,
+  saveDemoEducationStage,
+  type EducationStage,
+} from "./educationStageDemo"
+import {
+  loadDemoLessonDeliveryMode,
+  saveDemoLessonDeliveryMode,
+  type LessonDeliveryMode,
+} from "./lessonDeliveryMode"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../ui/sheet"
 import { ScenarioGuidePanel } from "../home/ScenarioGuidePanel"
 import {
@@ -45,6 +71,34 @@ import {
   stableDockConversationId,
 } from "./organizationDockConfig"
 import { EDU_WELCOME_WEIWEI_MARKER, readEducationSpaceWelcomeHints } from "./educationSpaceDemoPersistence"
+import { EDU_ROLE_DYNAMIC_OPENING_MARKER } from "./educationStageDemo"
+import { isEducationDockAppId } from "./organizationDockConfig"
+
+function AiClassroomLiveStandaloneWindow({
+  role,
+  lessonId,
+}: {
+  role: Exclude<EduSceneRole, "admin">
+  lessonId: string
+}) {
+  const lessonTitle = findLessonSummary(lessonId)?.title ?? DEMO_LESSON.title
+  const botAvatarSrc =
+    users.find((u) => u.id === "ai-assistant")?.avatar ?? currentUser.avatar
+
+  return (
+    <div className="relative h-screen w-screen overflow-hidden bg-[#0F1626]">
+      <AiClassroomLiveWindow
+        role={role}
+        lessonId={lessonId}
+        lessonTitle={lessonTitle}
+        botAvatarSrc={botAvatarSrc}
+        userAvatarSrc={currentUser.avatar}
+        subCuiOpen={false}
+        onClose={() => window.close()}
+      />
+    </div>
+  )
+}
 
 /** 场景零（`no-org`）且未加入组织：教育壳层首条助手气泡 + 底部追问（与 MainAIChatWindow 顶区引导一致） */
 function buildPortalDockWelcomeMessage(
@@ -56,6 +110,23 @@ function buildPortalDockWelcomeMessage(
 ): Message {
   const ts = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   const now = Date.now()
+
+  /**
+   * 教育三身份场景（场景六/七/八）+ 教育上下文 dock：
+   * 不写"你好，我是「教育」智能助手"这句通用欢迎，而是写一条占位 marker，
+   * 让 MainAIChatWindow 的 empty-state 接管 AI 主动开场（基于当前 stage 动态生成 greeting + brief + Hero）。
+   * 这样既避免重复欢迎语，又能在演示态切换 stage 时实时刷新开场文案。
+   */
+  if (eduScenarioRole(scenario) && (appId === "education" || isEducationDockAppId(appId))) {
+    return {
+      id: `dock-welcome-${idSuffix}-${now}`,
+      senderId: "ai-assistant",
+      content: EDU_ROLE_DYNAMIC_OPENING_MARKER,
+      timestamp: ts,
+      createdAt: now,
+    }
+  }
+
   const isScenarioZeroEduShell =
     isHomeScenarioZeroNoOrg(scenario, hasJoinedOrganizations) &&
     (appId === PERSONAL_EDU_SPACE_APP_ID || appId === "education")
@@ -124,6 +195,13 @@ function mainAiChatWindowInstanceKey(
   if (scenario === "no-org") {
     return standalone ? "no-org-standalone" : "home-scenario-no-org"
   }
+  /**
+   * 教育三身份场景（场景六/七/八）：稳定 key，避免切换会话时教育门户、教育空间状态被重挂；
+   * 与场景二一致选择固定 key（含 standalone 后缀以兼容独立窗口）。
+   */
+  if (isEduRoleScenario(scenario)) {
+    return standalone ? `home-scenario-${scenario}-standalone` : `home-scenario-${scenario}`
+  }
   return selectedId
 }
 
@@ -151,6 +229,43 @@ function buildScenarioZeroMainCuiWelcomeMessages(): Message[] {
 }
 
 /**
+ * 教育三身份场景（场景六/七/八/九）：主会话首条助手气泡文案统一为 **主 VVAI 标准欢迎**（与顶区 `MainVvaiStandardWelcomeCard` 一致）。
+ *
+ * 设计：**主 VVAI 欢迎气泡下方不再出推荐指令 chip**。
+ *
+ * 历史迭代沿革：
+ * - v6 早期：曾按 `(stage × deliveryMode)` 派发 4 chip（与教育门户内主开场 chip 同源），
+ *   动机是避免"主 VVAI / 门户内 / IM banner / 待办带"四处文案分叉；
+ * - 但产品复盘认为：
+ *   1) 主 VVAI 是"全身份共用 AI 入口"，欢迎气泡下挂 4 个教育向 chip 反而把这层"通用入口"窄化成教育业务出口
+ *   2) 教育业务的能力发现已由"待办带 / 教育 hero / dock 二级菜单 / 子 CUI 内主开场 chip"四处承担，主 VVAI 不必再重复
+ *   3) 用户在主 VVAI 大概率要问的是跨身份普适问题，给定向 chip 反而干扰
+ * - 因此 v7 起：**主 VVAI 欢迎气泡裸奔**（仅留欢迎文案，无 follow-up chip）。
+ *
+ * 注意：本改动**不影响**"首次进入教育应用"门户内的主开场（`MainVvaiStandardWelcomeCard` 下挂的 chip 行）、
+ * IM banner、待办带、子 CUI 内开场等其它教育业务出口；它们仍按各自 (role × stage × deliveryMode) 维度派发。
+ */
+function buildEduRoleWelcomeMessages(scenario: string | undefined): Message[] {
+  const role = eduScenarioRole(scenario)
+  if (!role) return []
+  const now = Date.now()
+  const ts = new Date().toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+  return [
+    {
+      id: `vvai-edu-role-${role}-${now}`,
+      senderId: "ai-assistant",
+      content: buildMainVvaiStandardWelcomePlainText(),
+      timestamp: ts,
+      createdAt: now,
+    },
+  ]
+}
+
+/**
  * 地址栏 `scenario` 对应的主会话首屏种子（写入 `messages`，与顶区静态欢迎互斥）。
  * 无匹配时返回 `[]`（由调用方决定是否清空主会话）。
  */
@@ -160,6 +275,14 @@ function mainCuiInitialSeedMessagesForUrlScenario(sc: string | null | undefined)
     return buildSingleOrgEduAttendanceFlowWelcomeMessages(sc ?? undefined)
   }
   if (sc === SCENARIO_CUI_CARD_RULES) return buildCuiCardRulesWelcomeMessages()
+  if (
+    sc === SCENARIO_EDU_TEACHER ||
+    sc === SCENARIO_EDU_STUDENT ||
+    sc === SCENARIO_EDU_PARENT ||
+    sc === SCENARIO_EDU_ADMIN
+  ) {
+    return buildEduRoleWelcomeMessages(sc)
+  }
   if (sc == null || sc === "") return buildMainEntryMainCuiWelcomeMessages()
   return []
 }
@@ -173,6 +296,7 @@ function pickMainCuiEmptyThreadSeedMessagesForScenario(
   if (isCuiCardRulesScenario(scenario)) return buildCuiCardRulesWelcomeMessages()
   if (isMainEntryScenario(scenario)) return buildMainEntryMainCuiWelcomeMessages()
   if (scenario === "no-org") return buildScenarioZeroMainCuiWelcomeMessages()
+  if (isEduRoleScenario(scenario)) return buildEduRoleWelcomeMessages(scenario)
   return null
 }
 
@@ -313,6 +437,21 @@ export function MainAI() {
 
   /** 独立浏览器窗口：`/main-ai?standalone=1`，仅《主CUI交互》全宽列（无《主导航栏》）、独立 state */
   const isStandaloneWindow = searchParams.get("standalone") === "1"
+  const isLiveClassroomWindow = searchParams.get("liveClassroom") === "1"
+  const liveClassroomRole = eduScenarioRole(scenario)
+
+  if (
+    isLiveClassroomWindow &&
+    liveClassroomRole &&
+    liveClassroomRole !== "admin"
+  ) {
+    return (
+      <AiClassroomLiveStandaloneWindow
+        role={liveClassroomRole}
+        lessonId={searchParams.get("lessonId") ?? DEMO_LESSON.id}
+      />
+    )
+  }
 
   /**
    * 主会话初始为空：《主入口》与场景二一致，dock 应用会话仍由 `handleDockAppActivate` 按需创建。
@@ -338,7 +477,9 @@ export function MainAI() {
       sc === SCENARIO_CUI_CARD_RULES ||
       sc === "no-org" ||
       sc == null ||
-      sc === ""
+      sc === "" ||
+      /** 场景六/七/八：原先落在此分支之外，主会话保留了 seed「c1」里的占位文案（英：Text Content），看起来就像从未注入教育种子 */
+      isEduRoleScenario(sc ?? undefined)
     ) {
       const seeds = mainCuiInitialSeedMessagesForUrlScenario(sc)
       return seeds.length ? withMainSeeds(seeds) : withMainSeeds([])
@@ -387,6 +528,43 @@ export function MainAI() {
   /** 侧栏 VVAI 历史列表高亮：与当前主会话消息快照一致的归档条目 id */
   const [sidebarMainHistoryHighlightId, setSidebarMainHistoryHighlightId] = React.useState<string | null>(null)
   const [scenarioGuideOpen, setScenarioGuideOpen] = React.useState(false)
+  /**
+   * 教育三身份场景（场景六/七/八）的「课前 / 课中 / 课后」demo 阶段。
+   * 这是 demo 用于演示「不同时间段进入产品」体验差异的快速切换入口，**不属于主产品体验区**，
+   * 因此放在演示页头（《场景说明》/《场景入口》同行），不再污染《主CUI交互》顶栏。
+   */
+  const isEduRoleDemoScenario = isEduRoleScenario(scenario)
+  const [educationStage, setEducationStage] = React.useState<EducationStage>(() =>
+    loadDemoEducationStage(scenario)
+  )
+  React.useEffect(() => {
+    setEducationStage(loadDemoEducationStage(scenario))
+  }, [scenario])
+  const handleEducationStageChange = React.useCallback(
+    (next: EducationStage) => {
+      setEducationStage(next)
+      saveDemoEducationStage(scenario, next)
+    },
+    [scenario],
+  )
+
+  /**
+   * 课程形态（线上 / 线下）演示开关。仅在 stage = 课中 时呈现切换器（差异最显著）。
+   * 即使切到课前 / 课后，状态依旧保留在 sessionStorage，再切回课中可继续看上次形态。
+   */
+  const [lessonDeliveryMode, setLessonDeliveryMode] = React.useState<LessonDeliveryMode>(() =>
+    loadDemoLessonDeliveryMode(scenario),
+  )
+  React.useEffect(() => {
+    setLessonDeliveryMode(loadDemoLessonDeliveryMode(scenario))
+  }, [scenario])
+  const handleLessonDeliveryModeChange = React.useCallback(
+    (next: LessonDeliveryMode) => {
+      setLessonDeliveryMode(next)
+      saveDemoLessonDeliveryMode(scenario, next)
+    },
+    [scenario],
+  )
 
   React.useEffect(() => {
     if (selectedId !== DEFAULT_MAIN_CHAT_ID) {
@@ -567,10 +745,19 @@ export function MainAI() {
             if (newId !== sid) {
               setConversations((prevList) => {
                 if (prevList.some((c) => c.id === newId)) return prevList
+                /**
+                 * 教育三身份 + 教育上下文 dock：使用占位 marker，避免与 empty-state AI 主动开场重复
+                 * （详见 buildPortalDockWelcomeMessage 处的注释）
+                 */
+                const isEduRoleEduDock =
+                  eduScenarioRole(scenario) != null &&
+                  (appId === "education" || isEducationDockAppId(appId))
                 const welcome: Message = {
                   id: `dock-welcome-${Date.now()}`,
                   senderId: "ai-assistant",
-                  content: `你好，我是「${appName}」智能助手。你可以使用底部快捷指令，或直接描述你的需求。`,
+                  content: isEduRoleEduDock
+                    ? EDU_ROLE_DYNAMIC_OPENING_MARKER
+                    : `你好，我是「${appName}」智能助手。你可以使用底部快捷指令，或直接描述你的需求。`,
                   timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
                   createdAt: Date.now(),
                 }
@@ -1158,6 +1345,9 @@ export function MainAI() {
       onSessionSidebarWidthChange={setSessionSidebarWidth}
       cuiMainChatId={DEFAULT_MAIN_CHAT_ID}
       scenario={scenario}
+      educationStage={educationStage}
+      onEducationStageChange={handleEducationStageChange}
+      lessonDeliveryMode={lessonDeliveryMode}
     />
   )
 
@@ -1187,6 +1377,31 @@ export function MainAI() {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-[var(--space-200)]">
+          {/* 教育三身份场景（场景六/七/八）专属：课前 / 课中 / 课后 demo 阶段切换。
+              用于演示用户在不同时间段进入产品时的体验差异，**仅作演示页头工具**，不进《主CUI交互》。 */}
+          {isEduRoleDemoScenario ? (
+            <div className="flex shrink-0 items-center gap-[var(--space-100)]">
+              <span
+                className="text-[length:var(--font-size-xs)] font-[var(--font-weight-medium)] text-text-tertiary"
+                aria-hidden
+              >
+                Demo
+              </span>
+              <EducationStageSwitcher
+                value={educationStage}
+                onChange={handleEducationStageChange}
+                size="sm"
+              />
+              {/* 课程形态（PRD 2.5.1）：差异最显著在课中，仅 stage="in" 时呈现切换器，
+                  避免课前 / 课后再让用户面对一个不影响当下体验的开关。 */}
+              {educationStage === "in" ? (
+                <LessonDeliveryModeSwitcher
+                  value={lessonDeliveryMode}
+                  onChange={handleLessonDeliveryModeChange}
+                />
+              ) : null}
+            </div>
+          ) : null}
           <button
             type="button"
             onClick={() => setScenarioGuideOpen(true)}

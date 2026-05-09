@@ -3,7 +3,14 @@ import { Dialog, DialogContent, DialogTrigger, DialogHeader, DialogTitle, Dialog
 import { Button } from "./components/ui/button";
 import { ComponentShowcase } from "./components/ComponentShowcase";
 import { useLocation, useNavigate } from "react-router";
-import { SCENARIO_CUI_CARD_RULES, SCENARIO_TWO_MULTI_ORGS } from "./components/main-ai/homeScenarioLayout";
+import {
+  SCENARIO_CUI_CARD_RULES,
+  SCENARIO_EDU_ADMIN,
+  SCENARIO_EDU_PARENT,
+  SCENARIO_EDU_STUDENT,
+  SCENARIO_EDU_TEACHER,
+  SCENARIO_TWO_MULTI_ORGS,
+} from "./components/main-ai/homeScenarioLayout";
 import { HOME_SCENARIO_COPY, HOME_SCENARIO_FIVE_ENTRY_LABEL } from "./homeScenarioCopy";
 
 function navigateMainAi(
@@ -115,6 +122,65 @@ export function Home() {
           <div className="flex w-full min-w-0 max-w-full flex-col gap-[var(--space-200)] text-left text-[length:var(--font-size-sm)] font-[var(--font-weight-regular)] leading-[1.55] text-text sm:max-w-[min(32rem,min(52vw,100%))] sm:flex-1 sm:pt-[var(--space-100)]">
             <p className="m-0 text-pretty">{HOME_SCENARIO_COPY.multiOrgPersonal}</p>
             <p className="m-0 text-pretty">{HOME_SCENARIO_COPY.multiOrgDock}</p>
+          </div>
+        </div>
+
+        {/* 教育三身份骨架：场景六（老师）/ 场景七（学生）/ 场景八（家长） */}
+        <div
+          id="scenario-edu-roles-notes"
+          className="flex w-full flex-col gap-[var(--space-300)]"
+        >
+          <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-start sm:gap-5 md:gap-6">
+            <Button
+              variant="chat-submit"
+              className="w-full shrink-0 sm:w-auto"
+              onClick={() => navigateMainAi(navigate, SCENARIO_EDU_TEACHER)}
+              title="教师身份：默认含示范教育机构 + 机构/个人教育空间，进入教育后顶栏切教育空间切换器"
+            >
+              场景六（老师进入教育）
+            </Button>
+            <p className="m-0 w-full min-w-0 max-w-full text-pretty text-left text-[length:var(--font-size-sm)] font-[var(--font-weight-regular)] leading-[1.55] text-text sm:max-w-[min(32rem,min(52vw,100%))] sm:flex-1 sm:pt-[var(--space-100)]">
+              {HOME_SCENARIO_COPY.scenarioSixEduTeacher}
+            </p>
+          </div>
+          <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-start sm:gap-5 md:gap-6">
+            <Button
+              variant="chat-submit"
+              className="w-full shrink-0 sm:w-auto"
+              onClick={() => navigateMainAi(navigate, SCENARIO_EDU_STUDENT)}
+              title="学生身份（C 端）：仅个人教育空间，无组织感知"
+            >
+              场景七（学生进入教育）
+            </Button>
+            <p className="m-0 w-full min-w-0 max-w-full text-pretty text-left text-[length:var(--font-size-sm)] font-[var(--font-weight-regular)] leading-[1.55] text-text sm:max-w-[min(32rem,min(52vw,100%))] sm:flex-1 sm:pt-[var(--space-100)]">
+              {HOME_SCENARIO_COPY.scenarioSevenEduStudent}
+            </p>
+          </div>
+          <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-start sm:gap-5 md:gap-6">
+            <Button
+              variant="chat-submit"
+              className="w-full shrink-0 sm:w-auto"
+              onClick={() => navigateMainAi(navigate, SCENARIO_EDU_PARENT)}
+              title="家长身份（C 端）：仅个人教育空间，无组织感知；含 Parent Copilot 入口"
+            >
+              场景八（家长进入教育）
+            </Button>
+            <p className="m-0 w-full min-w-0 max-w-full text-pretty text-left text-[length:var(--font-size-sm)] font-[var(--font-weight-regular)] leading-[1.55] text-text sm:max-w-[min(32rem,min(52vw,100%))] sm:flex-1 sm:pt-[var(--space-100)]">
+              {HOME_SCENARIO_COPY.scenarioEightEduParent}
+            </p>
+          </div>
+          <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-start sm:gap-5 md:gap-6">
+            <Button
+              variant="chat-submit"
+              className="w-full shrink-0 sm:w-auto"
+              onClick={() => navigateMainAi(navigate, SCENARIO_EDU_ADMIN)}
+              title="机构管理者身份（B 端）：教务 + 督导 + 校长合体视角；只有机构教育空间"
+            >
+              场景九（机构管理者进入教育）
+            </Button>
+            <p className="m-0 w-full min-w-0 max-w-full text-pretty text-left text-[length:var(--font-size-sm)] font-[var(--font-weight-regular)] leading-[1.55] text-text sm:max-w-[min(32rem,min(52vw,100%))] sm:flex-1 sm:pt-[var(--space-100)]">
+              {HOME_SCENARIO_COPY.scenarioNineEduAdmin}
+            </p>
           </div>
         </div>
 

@@ -70,6 +70,73 @@ export function isScenarioFiveLike(scenario: string | undefined): boolean {
 }
 
 /**
+ * 教育四身份场景（场景六/七/八/九）：分别对应 PRD 2.5/2.6 的老师 / 学生 / 家长 / 机构管理者入口。
+ * 四个 scenario 之间的差异由 `eduScenarioRole` 给出，业务侧用 `isEduRoleScenario` 守卫；
+ * 与场景二（`edu-one`）刻意拆开演进，避免在共享分支里改逻辑。
+ *
+ * 「机构管理者」（场景九 / `edu-admin`）= PRD 2.5.4 教务 + 2.5.5 督导 + 2.5.6 校区主管/校长/总部 的合体视角，
+ * 默认必须挂在 1 个示范教育机构下（无机构对管理者来说没意义）；与三身份的差异：
+ * - 不"上课"，没有"我的课表"dock，没有单课子 CUI 入口（仅观察态的督导抽课，本期暂未做）
+ * - dock 三项：校区运营 / 教学质量 / 经营大盘
+ */
+export const SCENARIO_EDU_TEACHER = "edu-teacher" as const
+export const SCENARIO_EDU_STUDENT = "edu-student" as const
+export const SCENARIO_EDU_PARENT = "edu-parent" as const
+export const SCENARIO_EDU_ADMIN = "edu-admin" as const
+
+export type EduSceneRole = "teacher" | "student" | "parent" | "admin"
+
+/**
+ * 「会上课的人」=「会进入单课子 CUI / Hero 卡 / IM 闭环」的三身份；与 admin 形成互斥子集。
+ *
+ * 用于强类型收紧：所有"按课次维度的卡片 / 数据 / 收件箱 / Skill 树"都只接 `EduLessonAttendingRole`，
+ * admin 不必（也不应）出现在这些类型签名里——管理者视角不进单课，子 CUI 对其无意义。
+ */
+export type EduLessonAttendingRole = Exclude<EduSceneRole, "admin">
+
+export function isLessonAttendingEduRole(role: EduSceneRole | null): role is EduLessonAttendingRole {
+  return role === "teacher" || role === "student" || role === "parent"
+}
+
+export function eduScenarioRole(scenario: string | undefined): EduSceneRole | null {
+  if (scenario === SCENARIO_EDU_TEACHER) return "teacher"
+  if (scenario === SCENARIO_EDU_STUDENT) return "student"
+  if (scenario === SCENARIO_EDU_PARENT) return "parent"
+  if (scenario === SCENARIO_EDU_ADMIN) return "admin"
+  return null
+}
+
+export function isEduRoleScenario(scenario: string | undefined): boolean {
+  return eduScenarioRole(scenario) != null
+}
+
+/**
+ * 教育多身份场景中，C 端身份（学生 / 家长）：默认无组织、无机构教育空间，
+ * 顶栏「教育空间切换器」只保留个人空间，且不展示「创建机构教育空间」入口。
+ */
+export function isEduRoleConsumerScenario(scenario: string | undefined): boolean {
+  const role = eduScenarioRole(scenario)
+  return role === "student" || role === "parent"
+}
+
+/**
+ * 机构管理者（场景九）：必须挂在机构教育空间下；顶栏「教育空间切换器」隐藏个人空间项，
+ * 也不允许"创建个人教育空间"——管理者的工作主体是机构本身。
+ */
+export function isEduAdminScenario(scenario: string | undefined): boolean {
+  return eduScenarioRole(scenario) === "admin"
+}
+
+/**
+ * 「会上课的人」——含课表、Hero 卡、子 CUI 的入口结构（教师 / 学生 / 家长）。
+ * 与之相对：管理者（admin）没有"我的课表"dock，也无单课子 CUI 入口。
+ */
+export function isLessonAttendingEduRoleScenario(scenario: string | undefined): boolean {
+  const role = eduScenarioRole(scenario)
+  return role === "teacher" || role === "student" || role === "parent"
+}
+
+/**
  * 主《主CUI交互》顶栏右侧「历史消息」时钟按钮是否隐藏。
  * 场景0（`no-org`）、场景五，以及《主入口》、场景二与本入口（与既有逻辑一致）均不展示。
  */
@@ -78,5 +145,6 @@ export function hideMainCuiNavHistoryIcon(scenario: string | undefined): boolean
   if (isScenarioTwoLike(scenario)) return true
   if (scenario === "no-org") return true
   if (isScenarioFiveLike(scenario)) return true
+  if (isEduRoleScenario(scenario)) return true
   return false
 }

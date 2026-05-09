@@ -2,6 +2,7 @@ import * as React from "react";
 import { svgPaths } from "./chat-icons";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { AttachmentMenu } from "./AttachmentMenu";
+import vvaiWordmark from "../../assets/vvai-wordmark.png";
 
 // Data URIs from the import
 const imgBackground = "data:image/svg+xml,%3Csvg%20preserveAspectRatio%3D%22none%22%20width%3D%22100%25%22%20height%3D%22100%25%22%20overflow%3D%22visible%22%20style%3D%22display%3A%20block%3B%22%20viewBox%3D%220%200%20769%208%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%0A%3Crect%20id%3D%22%26%23229%3B%26%23137%3B%26%23170%3B%26%23229%3B%26%23136%3B%26%23135%3B%26%23232%3B%26%23146%3B%26%23153%3B%26%23231%3B%26%23137%3B%26%23136%3B%22%20width%3D%22769%22%20height%3D%228%22%20fill%3D%22url(%23paint0_linear_11_5638)%22%2F%3E%0A%3Cdefs%3E%0A%3ClinearGradient%20id%3D%22paint0_linear_11_5638%22%20x1%3D%22384.5%22%20y1%3D%220%22%20x2%3D%22384.5%22%20y2%3D%228%22%20gradientUnits%3D%22userSpaceOnUse%22%3E%0A%3Cstop%20stop-color%3D%22white%22%2F%3E%0A%3Cstop%20offset%3D%221%22%20stop-color%3D%22white%22%20stop-opacity%3D%220%22%2F%3E%0A%3C%2FlinearGradient%3E%0A%3C%2Fdefs%3E%0A%3C%2Fsvg%3E%0A";
@@ -18,15 +19,20 @@ export function MenuIcon() {
   );
 }
 
-/** 顶栏品牌字；字号与会话侧栏「历史会话」标题一致（--font-size-lg） */
+/**
+ * 全局 VVAI 品牌字标（与产品截图一致：暖橙金色、几何无衬线字标）。
+ * 使用位图以保证各端渲染与品牌素材 1:1；高度锚定顶栏字号 token。
+ */
 export function VvAiLogo() {
   return (
-    <span
-      className="inline-block shrink-0 select-none bg-gradient-to-r from-[#40C8FF] to-[#0C41FF] bg-clip-text text-[length:var(--font-size-lg)] font-[var(--font-weight-semi-bold)] leading-none tracking-[var(--letter-spacing-xs)] text-transparent"
-      style={{ WebkitBackgroundClip: "text" }}
-    >
-      VVAI
-    </span>
+    <img
+      src={vvaiWordmark}
+      alt="VVAI"
+      width={72}
+      height={20}
+      draggable={false}
+      className="h-[var(--font-size-lg)] w-auto max-w-[min(100%,5.5rem)] shrink-0 select-none object-contain object-left"
+    />
   )
 }
 

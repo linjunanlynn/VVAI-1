@@ -2,27 +2,86 @@ import * as React from "react"
 import { ChevronDown } from "lucide-react"
 import { cn } from "../ui/utils"
 
+/**
+ * Chip 视觉态：
+ * - `active`（默认）= 当前要处理；蓝底蓝边
+ * - `completed` = 已完成；灰化、文字 strike-through、淡显，仍可点
+ * - `overdue` = 已逾期未完成；红边 + 微微红底，提示用户优先处理
+ */
+export type TaskChipTone = "active" | "completed" | "overdue"
+
 interface TaskChipProps {
   iconSrc: string
   alt: string
   title: string
   time?: string
   count?: number
+  tone?: TaskChipTone
   onClick?: () => void
 }
 
-export function TaskChip({ iconSrc, alt, title, time, count, onClick }: TaskChipProps) {
+const TONE_CONTAINER: Record<TaskChipTone, string> = {
+  active:
+    "border border-[var(--blue-11)] bg-[var(--blue-12)] hover:bg-[var(--blue-11)]",
+  completed:
+    "border border-border bg-[var(--black-alpha-12)] hover:bg-[var(--black-alpha-11)] opacity-70",
+  overdue:
+    "border border-[color:var(--color-error)] bg-[color:var(--color-error-bg,rgba(229,72,77,0.08))] hover:bg-[color:var(--color-error-bg,rgba(229,72,77,0.12))]",
+}
+
+const TONE_TITLE: Record<TaskChipTone, string> = {
+  active: "text-text",
+  completed: "text-text-tertiary line-through",
+  overdue: "text-[color:var(--color-error)]",
+}
+
+const TONE_TIME: Record<TaskChipTone, string> = {
+  active: "text-text-secondary",
+  completed: "text-text-tertiary",
+  overdue: "text-[color:var(--color-error)]",
+}
+
+export function TaskChip({
+  iconSrc,
+  alt,
+  title,
+  time,
+  count,
+  tone = "active",
+  onClick,
+}: TaskChipProps) {
+  const containerCls = TONE_CONTAINER[tone]
+  const titleCls = TONE_TITLE[tone]
+  const timeCls = TONE_TIME[tone]
+  /** 状态标记 emoji（与文案分离，避免破坏 title 行宽） */
+  const stateBadge =
+    tone === "completed" ? "✓ " : tone === "overdue" ? "⚠ " : ""
   return (
     <div
       onClick={onClick}
-      className="flex min-w-0 w-full cursor-pointer items-center gap-[var(--space-200)] rounded-[var(--radius-md)] border border-[var(--blue-11)] bg-[var(--blue-12)] px-[var(--space-300)] py-[var(--space-200)] text-[length:var(--font-size-base)] transition-colors hover:bg-[var(--blue-11)]"
+      className={cn(
+        "flex min-w-0 w-full cursor-pointer items-center gap-[var(--space-200)] rounded-[var(--radius-md)] px-[var(--space-300)] py-[var(--space-200)] text-[length:var(--font-size-base)] transition-colors",
+        containerCls,
+      )}
     >
       <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center">
-        <img src={iconSrc} alt={alt} className="h-full w-full object-contain" />
+        <img
+          src={iconSrc}
+          alt={alt}
+          className={cn(
+            "h-full w-full object-contain",
+            tone === "completed" && "opacity-50",
+          )}
+        />
       </span>
-      <span className="min-w-0 flex-1 truncate text-left text-text">{title}</span>
+      <span className={cn("min-w-0 flex-1 truncate text-left", titleCls)}>
+        {stateBadge}
+        {title}
+      </span>
       {time && (
-        <span className="text-[length:var(--font-size-xs)] text-text-secondary">{time}</span>
+        <span className={cn("text-[length:var(--font-size-xs)]", timeCls)}>
+          {time}
+        </span>
       )}
       {count !== undefined && (
         <div className="ml-1 flex items-center justify-center gap-[var(--space-50)] rounded-[var(--radius-full)] bg-bg py-[var(--space-50)] pl-[var(--space-150)] pr-[var(--space-100)]">
@@ -46,6 +105,13 @@ interface PinnedTaskCardProps {
   onChipClick?: (chip: TaskChipProps) => void
   isExpanded?: boolean
   onExpandedChange?: (expanded: boolean) => void
+  /**
+   * 收起态「你还有 N 个待办」的数字口径。
+   * 不传时：沿用各 chip 的 `count` 累加（主 VVAI 样板：单 chip 用 count 表示批量待办数）；
+   * 累加为 0 时回退为 `chips.length`。
+   * 教育语境应传入与问候语一致的条数（通常为 `chips.length`），避免与展开平铺条数不一致。
+   */
+  collapsedSummaryCount?: number
 }
 
 const CARD_PAD_X = "px-[var(--space-400)]"
@@ -56,11 +122,18 @@ export function PinnedTaskCard({
   onChipClick,
   isExpanded: controlledExpanded,
   onExpandedChange,
+  collapsedSummaryCount,
 }: PinnedTaskCardProps) {
   const [internalExpanded, setInternalExpanded] = React.useState(true)
 
   const isExpanded = controlledExpanded !== undefined ? controlledExpanded : internalExpanded
-  const pendingCount = chips.reduce((sum, chip) => sum + (chip.count ?? 0), 0)
+  const sumChipCounts = chips.reduce((sum, chip) => sum + (chip.count ?? 0), 0)
+  const pendingCount =
+    collapsedSummaryCount !== undefined
+      ? collapsedSummaryCount
+      : sumChipCounts > 0
+        ? sumChipCounts
+        : chips.length
 
   const handleToggle = () => {
     const newValue = !isExpanded
