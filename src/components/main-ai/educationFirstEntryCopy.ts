@@ -16,7 +16,7 @@
  * 同一身份在不同时段 / 不同课程形态进来，能立刻看到的"AI 能为我做什么"是不同的：
  *
  * - **课前**（线上线下共用）：备课 / 推预习 / 课前检查 / 学情画像（教师）
- * - **课中 · 🔵 线上**：进入课堂 / 出随堂题 / 节奏建议 / 私聊学员（教师）
+ * - **课中 · 🔵 线上**：打开在线教室 / 出随堂题 / 签到点名 / 本节资料（教师，与侧 CUI 能力对齐）
  * - **课中 · 🟢 线下**：进教室助手 / 看 IFP 板书 / 摄像头追踪发言者 / 物理学具记录站（教师）
  * - **课后**（线上线下共用）：审课后报告 / 群发家长 / 进步对比 / 生成变式题（教师）
  *
@@ -83,7 +83,7 @@ interface EduFirstEntryCopySource {
 /* ============================================================
  * Teacher（场景六）—— 课前 / 课中 / 课后 chip 切换；课中再分线上 / 线下
  *   课前：备课 + 学情 + 推预习 + 就位检查
- *   课中 🔵 线上：上课副驾说明（direct 答疑）+ 出随堂题 + 节奏建议 + 私聊学员
+ *   课中 🔵 线上：在线教室 + 随堂题 + 签到 + 资料（均 course-pick 进对应课子 CUI）
  *   课中 🟢 线下：进教室助手 + IFP 板书 OCR + 摄像头追踪发言者 + 物理学具记录站
  *   课后：审报告 + 群发家长 + 进步对比 + 生成变式题
  * ============================================================ */
@@ -97,10 +97,10 @@ const TEACHER_COPY: EduFirstEntryCopySource = {
       { command: "课前就位检查", skillId: "tt-ready" },
     ],
     in: [
-      { command: "课中能做什么", skillId: "tc-question" },
+      { command: "打开在线教室", skillId: "tc-question" },
       { command: "出一道随堂题", skillId: "tc-question" },
-      { command: "节奏建议", skillId: "tc-pace" },
-      { command: "私聊学员", skillId: "tc-private" },
+      { command: "签到点名", skillId: "tc-question" },
+      { command: "本节资料", skillId: "tc-question" },
     ],
     post: [
       { command: "课后报告", skillId: "ta-report" },
@@ -240,7 +240,9 @@ const EDU_FIRST_ENTRY_COMMAND_ALIASES: Record<string, string> = {
   "本学节情": "本节学情",
   "推送预习包给学生": "推送预习包",
   "全民预习包": "推送预习包",
-  "上课时帮我做什么": "课中能做什么",
+  "上课时帮我做什么": "打开在线教室",
+  "课中能做什么": "打开在线教室",
+  "进入课堂助手": "打开在线教室",
   "看一份节奏建议": "节奏建议",
   "私聊一个学员": "私聊学员",
   "进教室助手": "进入教室助手",
@@ -314,8 +316,13 @@ export function getEduFirstEntryCopy(
   deliveryMode: LessonDeliveryMode = "online",
 ): EduFirstEntryCopy {
   const source = COPY_SOURCE_BY_ROLE[role]
+  let greeting = source.greeting
+  if (role === "teacher" && stage === "in" && deliveryMode === "online") {
+    greeting =
+      "王老师，课中我帮你串起在线课堂和本节课务：打开在线教室、推随堂题、签到点名、查看本节课资料，都从下面选一节直接进入。"
+  }
   return {
-    greeting: source.greeting,
+    greeting,
     samplePrompts: pickStagePrompts(source, stage, deliveryMode),
   }
 }

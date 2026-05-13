@@ -95,15 +95,97 @@ import {
   parseEduDockMenuCardContent,
 } from "./educationDockMenuRegistry"
 import { EduDockMenuCard } from "./EduDockMenuCard"
+import {
+  EduCourseProductsCard,
+  RENDER_EDU_COURSE_PRODUCTS_CARD_MARKER,
+  buildEduCourseProductsMarkerContent,
+  parseEduCourseProductsMarkerContent,
+} from "./EduCourseProductsCard"
+import {
+  EduTeachingMaterialsBrowserCard,
+  RENDER_EDU_TEACHING_MATERIALS_BROWSER_CARD_MARKER,
+  buildEduTeachingMaterialsBrowserMarkerContent,
+  parseEduTeachingMaterialsBrowserMarkerContent,
+} from "./EduTeachingMaterialsBrowserCard"
 import { EduCourseFulfillmentCard } from "./EduCourseFulfillmentCard"
+import {
+  EDU_DISK_LIST_CARD_MARKER,
+  EDU_DISK_FOLDER_CARD_MARKER,
+  buildEduDiskListCardContent,
+  buildEduDiskFolderCardContent,
+  parseEduDiskListCardContent,
+  parseEduDiskFolderCardContent,
+  getEduDiskListData,
+  getEduDiskFolderData,
+  isEduDiskEntryCommand,
+  matchEduDiskOpenSpaceCommand,
+} from "./educationDiskRegistry"
+import { EduDiskListCard } from "./EduDiskListCard"
+import { EduDiskFolderCard } from "./EduDiskFolderCard"
+import { LessonOperationListCard } from "./LessonOperationListCard"
+import {
+  LESSON_OPERATION_LIST_CARD_MARKER,
+  buildLessonOperationListCardContent,
+  getLessonOperationKindByMenuId,
+  parseLessonOperationListCardContent,
+} from "./lessonOperationListCardRegistry"
 
 /**
  * 课中提示卡 marker（与 EduDockMenuCard 类似，role 跟在 marker 后；学生 / 家长 / 教师都可走同一卡片）。
  */
 const LIVE_LESSON_HINT_CARD_MARKER = "<<<RENDER_LIVE_LESSON_HINT_CARD>>>" as const
 const EDU_COURSE_FULFILLMENT_CARD_MARKER = "<<<RENDER_EDU_COURSE_FULFILLMENT_CARD>>>" as const
-import { useEduImEventsForRole, useEduImUnreadCountForRole } from "./eduImBus"
+/**
+ * 主对话内嵌「风采报告卡」marker（仅学生 / 家长侧）：
+ * - 用于 IM banner 点击「课后报告」消息时，直接在主对话出一张 LessonReviewCard，
+ *   而不是跳子 CUI，方便家长 / 学生在主对话流里点赞 / 评论。
+ * - 载荷以 `MARKER:role:base64(JSON.stringify({lessonId, lessonTitle}))` 形式编码，
+ *   保证 lessonTitle 内的《》/中文/特殊字符不会破坏 marker 分隔。
+ */
+const MAIN_LESSON_REVIEW_CARD_MARKER = "<<<RENDER_MAIN_LESSON_REVIEW_CARD>>>" as const
+
+type EduSceneRoleNonAdmin = "teacher" | "student" | "parent"
+
+function encodeMainLessonReviewMarker(
+  role: EduSceneRoleNonAdmin,
+  lessonId: string,
+  lessonTitle: string,
+): string {
+  const payload = JSON.stringify({ lessonId, lessonTitle })
+  // btoa 不支持非 ASCII；先 encodeURIComponent → unescape 转 latin1
+  const safe =
+    typeof window !== "undefined" && typeof window.btoa === "function"
+      ? window.btoa(unescape(encodeURIComponent(payload)))
+      : payload
+  return `${MAIN_LESSON_REVIEW_CARD_MARKER}:${role}:${safe}`
+}
+
+function parseMainLessonReviewMarker(
+  content: string,
+): { role: EduSceneRoleNonAdmin; lessonId: string; lessonTitle: string } | null {
+  if (!content.startsWith(`${MAIN_LESSON_REVIEW_CARD_MARKER}:`)) return null
+  const rest = content.slice(MAIN_LESSON_REVIEW_CARD_MARKER.length + 1)
+  const sep = rest.indexOf(":")
+  if (sep === -1) return null
+  const role = rest.slice(0, sep)
+  if (role !== "teacher" && role !== "student" && role !== "parent") return null
+  const encoded = rest.slice(sep + 1)
+  try {
+    const raw =
+      typeof window !== "undefined" && typeof window.atob === "function"
+        ? decodeURIComponent(escape(window.atob(encoded)))
+        : encoded
+    const parsed = JSON.parse(raw) as { lessonId?: unknown; lessonTitle?: unknown }
+    if (typeof parsed.lessonId !== "string" || typeof parsed.lessonTitle !== "string") return null
+    return { role, lessonId: parsed.lessonId, lessonTitle: parsed.lessonTitle }
+  } catch {
+    return null
+  }
+}
+
+import { useEduImEventsForRole, useEduImUnreadCountForRole, type EduImEvent } from "./eduImBus"
 import { EduImInboxBanner } from "./EduImInboxBanner"
+import { LessonReviewCard } from "./LessonReviewCard"
 import { useClassTasksForLesson } from "./eduClassTaskBus"
 import { EduClassTaskBanner } from "./EduClassTaskBanner"
 import {
@@ -215,10 +297,22 @@ import {
   AiClassroomSeriesSideConversationPanel,
   type AiClassroomSeriesSidePanelOpenRequest,
 } from "./AiClassroomSeriesSideConversationPanel"
+import { CreateCourseSideConversationPanel } from "./CreateCourseSideConversationPanel"
+import { CreateScheduleSideConversationPanel } from "./CreateScheduleSideConversationPanel"
+import {
+  EduCourseGoodsCard,
+  RENDER_EDU_COURSE_GOODS_CARD_MARKER,
+  buildEduCourseGoodsMarkerContent,
+  parseEduCourseGoodsMarkerContent,
+} from "./EduCourseGoodsCard"
 import { AiClassroomScheduleAgendaPanel } from "./AiClassroomScheduleAgendaPanel"
 import { DEMO_LESSON, DEMO_STUDENT_SELF } from "./aiClassroomLessonDemo"
 import { findLessonSummary } from "./aiClassroomLessonsDemo"
 import { findLessonSeries } from "./aiClassroomLessonSeriesDemo"
+import {
+  buildSeriesFromCourse,
+  findCourseBySeriesId,
+} from "./eduCoursesPersistence"
 import type { EducationPinnedChip } from "./educationPinnedTaskData"
 import {
   consumePendingEduSkillRequest,
@@ -257,7 +351,7 @@ import recruitmentIcon from 'figma:asset/81759343e3c0735a95d3ee5a5e7cf7a767e8384
 import salaryIcon from 'figma:asset/776e838a4088fe446d0c5d29220b88ab1ad922bc.png';
 import inventoryIcon from 'figma:asset/1850125514f29104c8f00034a7873528b971a815.png';
 
-import { Calculator, BookA, PenTool, Users, ArrowLeft, MoreHorizontal, Briefcase, ShoppingBag, DollarSign, GripHorizontal, ChevronDown, Boxes, Upload, BadgeDollarSign, Clock, CalendarCheck, BarChart3, UserCog, Receipt, History, PieChart, PanelLeft, Square, X, AppWindow, Maximize2, LayoutGrid } from "lucide-react"
+import { Calculator, BookA, PenTool, Users, ArrowLeft, MoreHorizontal, Briefcase, ShoppingBag, DollarSign, GripHorizontal, ChevronDown, Boxes, Upload, BadgeDollarSign, Clock, CalendarCheck, BarChart3, UserCog, Receipt, History, PieChart, PanelLeft, Square, X, AppWindow, Maximize2, LayoutGrid, GraduationCap } from "lucide-react"
 import { motion, AnimatePresence, useDragControls } from "motion/react"
 import { usePopper } from "react-popper"
 import { createPortal } from "react-dom"
@@ -1939,6 +2033,55 @@ export function MainAIChatWindow({
   const [aiClassroomSeriesPendingRequest, setAiClassroomSeriesPendingRequest] =
     React.useState<AiClassroomSeriesSidePanelOpenRequest | null>(null)
 
+  /**
+   * 创建课程侧边子 CUI 开关 + 上下文。
+   * 由 EduCourseProductsCard「+ 创建课程」按钮触发；提交完成后自动关闭并由 store 订阅刷新课程列表。
+   */
+  const [createCourseSideOpen, setCreateCourseSideOpen] = React.useState(false)
+  const [createCourseSideCtx, setCreateCourseSideCtx] = React.useState<{
+    orgId: string
+    scenario?: string
+  } | null>(null)
+  const openCreateCourseSidePanel = React.useCallback(
+    (ctx: { orgId: string; scenario?: string }) => {
+      setCreateCourseSideCtx(ctx)
+      setCreateCourseSideOpen(true)
+    },
+    [],
+  )
+  const closeCreateCourseSidePanel = React.useCallback(() => {
+    setCreateCourseSideOpen(false)
+  }, [])
+
+  /**
+   * 创建排课表侧边子 CUI 开关 + 上下文。
+   * 由 EduCourseProductsCard 行内「添加排课表 / 打开排课表」CTA 与右下"添加排课"图标触发；
+   * 提交完成后通过 store 通知，EduCourseProductsCard 与 EduCourseFulfillmentCard 自动刷新。
+   */
+  const [createScheduleSideOpen, setCreateScheduleSideOpen] = React.useState(false)
+  const [createScheduleSideCtx, setCreateScheduleSideCtx] = React.useState<{
+    orgId: string
+    scenario?: string
+    courseId: string
+    /** "create" 建新草稿；"edit" 直接打开课程现有 finalized 排课表 */
+    mode: "create" | "edit"
+  } | null>(null)
+  const openCreateScheduleSidePanel = React.useCallback(
+    (ctx: {
+      orgId: string
+      scenario?: string
+      courseId: string
+      mode: "create" | "edit"
+    }) => {
+      setCreateScheduleSideCtx(ctx)
+      setCreateScheduleSideOpen(true)
+    },
+    [],
+  )
+  const closeCreateScheduleSidePanel = React.useCallback(() => {
+    setCreateScheduleSideOpen(false)
+  }, [])
+
   const openAiClassroomSidePanel = React.useCallback(
     (req?: AiClassroomSidePanelOpenRequest & { lessonId?: string }) => {
       /** 切换 lessonId（agenda 选课时传入）；不传则保留当前 */
@@ -2220,6 +2363,63 @@ export function MainAIChatWindow({
       })
     },
     [openAiClassroomSidePanel, scenario]
+  )
+
+  /**
+   * IM 收件箱「课后报告」专用打开器（学生 / 家长侧）：
+   *
+   * 产品需求：老师发送风采报告后，孩子 / 家长在主对话顶部 IM banner 看到一条「老师已发送《xxx》风采报告」，
+   * 点击 **不应**跳子 CUI，而是直接在主对话流里 push 一条用户气泡 + 一张 `LessonReviewCard`
+   * （社交流式的"风采报告"卡），方便家长 / 孩子在主对话内点赞 / 评论。
+   *
+   * 其它事件类型（求助 / 私聊 / 请假等）维持原行为，仍走 `handleEduRoleSkillCommand` 进子 CUI。
+   */
+  const handleEduImInboxOpen = React.useCallback(
+    (command: string, evt: EduImEvent) => {
+      const role = eduScenarioRole(scenario)
+      const isReportToStudentOrParent =
+        evt.type === "report-to-parent" && (role === "student" || role === "parent")
+      if (!isReportToStudentOrParent) {
+        handleEduRoleSkillCommand(command)
+        return
+      }
+      const lessonId = evt.lessonId ?? DEMO_LESSON.id
+      const lessonTitle = evt.lessonTitle ?? "本节课程"
+      if (activeApp !== "education") setActiveApp("education")
+      const now = Date.now()
+      const ts = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      const userMsg: Message = {
+        id: `user-edu-im-open-${now}`,
+        senderId: conversation.user.id,
+        content: command,
+        timestamp: ts,
+        createdAt: now,
+      }
+      const cardMsg: Message = {
+        id: `bot-edu-im-review-card-${now + 1}`,
+        senderId: "ai-assistant",
+        content: encodeMainLessonReviewMarker(
+          role as EduSceneRoleNonAdmin,
+          lessonId,
+          lessonTitle,
+        ),
+        timestamp: ts,
+        createdAt: now + 1,
+      }
+      setEducationMessages((prev) => [...prev, userMsg])
+      window.setTimeout(() => {
+        setEducationMessages((prev) => [...prev, cardMsg])
+        scrollRef.current?.scrollIntoView({ behavior: "smooth" })
+      }, 320)
+    },
+    [
+      scenario,
+      activeApp,
+      conversation.user.id,
+      setEducationMessages,
+      handleEduRoleSkillCommand,
+      setActiveApp,
+    ],
   )
 
   /**
@@ -2858,6 +3058,105 @@ export function MainAIChatWindow({
         }, 320)
         return true
       }
+      /**
+       * 「课程商品」走 EduCourseGoodsCard：浏览态 · 列表点行直接进对应课程子 CUI。
+       * 与「课程课表」（ecm_schedule）严格区分——
+       *  - 课程商品（egm_course）：浏览 + 入口；不做创建 / 排课 / 上下架（这些归到课程课表）
+       *  - 课程课表（ecm_schedule）：完整管理态（创建 / 上传大纲 / 添加排课表 / 删除）
+       *
+       * 顶部业务摘要仍复用 `educationDockMenuRegistry.egm_course`，避免"在售 N 个 / 本月新上 M 个"原文案丢失。
+       */
+      if (menuId === "egm_course") {
+        const now = Date.now()
+        const userMsg: Message = {
+          id: `user-edu-dock-${menuId}-${now}`,
+          senderId: conversation.user.id,
+          content: `查看「${appName} · ${menuName}」`,
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          createdAt: now,
+        }
+        const botMsg: Message = {
+          id: `bot-edu-course-goods-${now + 1}`,
+          senderId: "ai-assistant",
+          content: buildEduCourseGoodsMarkerContent({
+            spaceOrgId: currentOrg,
+            spaceScenario: scenario,
+          }),
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          createdAt: now + 1,
+        }
+        setEducationMessages((prev) => [...prev, userMsg])
+        window.setTimeout(() => {
+          setEducationMessages((prev) => [...prev, botMsg])
+          scrollRef.current?.scrollIntoView({ behavior: "smooth" })
+        }, 320)
+        return true
+      }
+      /**
+       * 「课程课表」走专属卡：智能课表助手（搜索 / 筛选 / 列表 / 「+ 创建课程」）。
+       *
+       * 注意：与「课程商品」（egm_course）严格区分——
+       *  - 课程课表（ecm_schedule）：聚焦"课程列表 + 排课 + 创建课程"，由 eduCoursesPersistence 驱动
+       *  - 课程商品（egm_course）：上面已分流到 EduCourseGoodsCard，不到这里
+       */
+      if (menuId === "ecm_schedule") {
+        const now = Date.now()
+        const userMsg: Message = {
+          id: `user-edu-dock-${menuId}-${now}`,
+          senderId: conversation.user.id,
+          content: `查看「${appName} · ${menuName}」`,
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          createdAt: now,
+        }
+        const botMsg: Message = {
+          id: `bot-edu-course-products-${now + 1}`,
+          senderId: "ai-assistant",
+          content: buildEduCourseProductsMarkerContent({
+            spaceOrgId: currentOrg,
+            spaceScenario: scenario,
+          }),
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          createdAt: now + 1,
+        }
+        setEducationMessages((prev) => [...prev, userMsg])
+        window.setTimeout(() => {
+          setEducationMessages((prev) => [...prev, botMsg])
+          scrollRef.current?.scrollIntoView({ behavior: "smooth" })
+        }, 320)
+        return true
+      }
+      /**
+       * 「教学管理」二级菜单下的 4 个三级菜单（资料 / 考勤 / 作业 / 风采）：
+       * 走 LessonOperationListCard：跨课次列表卡 + 行内类别摘要 + 点行进子 CUI。
+       *
+       * 注意：4 角色共用同一组 menuId（tm_*），仅 kind 维度切换；
+       * 风采菜单在老师 / admin 侧文案为「点评风采」、学生 / 家长侧为「报告风采」，
+       * 由 `getLessonOperationCardTitle(role, kind)` 在卡内统一渲染。
+       */
+      const lessonOpKind = getLessonOperationKindByMenuId(menuId)
+      if (lessonOpKind != null) {
+        const now = Date.now()
+        const userMsg: Message = {
+          id: `user-edu-dock-${menuId}-${now}`,
+          senderId: conversation.user.id,
+          content: `查看「${appName} · ${menuName}」`,
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          createdAt: now,
+        }
+        const botMsg: Message = {
+          id: `bot-edu-lesson-op-${menuId}-${now + 1}`,
+          senderId: "ai-assistant",
+          content: buildLessonOperationListCardContent(role, lessonOpKind),
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          createdAt: now + 1,
+        }
+        setEducationMessages((prev) => [...prev, userMsg])
+        window.setTimeout(() => {
+          setEducationMessages((prev) => [...prev, botMsg])
+          scrollRef.current?.scrollIntoView({ behavior: "smooth" })
+        }, 320)
+        return true
+      }
       const data = getEduDockMenuCardData(role, menuId, educationStage)
       if (!data) return false
       const now = Date.now()
@@ -2882,12 +3181,109 @@ export function MainAIChatWindow({
       }, 320)
       return true
     },
-    [conversation.user.id, educationStage, setEducationMessages],
+    [conversation.user.id, educationStage, setEducationMessages, currentOrg, scenario],
+  )
+
+  /**
+   * 教育微盘卡 1（列表卡）：在当前会话里 push「用户气泡 = 教育微盘 + AI 卡片 marker」。
+   *
+   * 入口：
+   *  - 微盘 dock 内联快捷指令「教育微盘」chip 点击
+   *  - 卡 2 底部「← 返回教育微盘列表」按钮
+   *  - （后续）用户主动输入命中 isEduDiskEntryCommand
+   *
+   * 角色解析：
+   *  - 教育场景：取 `eduSceneRoleId`
+   *  - 非教育场景：兜底 student（因为微盘是个人范围 dock，与组织 / 教育主体无关）
+   *
+   * 不区分 dock 上下文：disk dock 之外的会话也允许出卡（微盘聚合视图本身就是跨上下文的）。
+   */
+  const openEduDiskListCardInChat = React.useCallback(() => {
+    const role: EduSceneRole = eduSceneRoleId ?? "student"
+    const now = Date.now()
+    const userMsg: Message = {
+      id: `user-edu-disk-list-${now}`,
+      senderId: conversation.user.id,
+      content: "教育微盘",
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      createdAt: now,
+    }
+    const botMsg: Message = {
+      id: `bot-edu-disk-list-${now + 1}`,
+      senderId: "ai-assistant",
+      content: buildEduDiskListCardContent(role),
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      createdAt: now + 1,
+    }
+    setMessages((prev) => [...prev, userMsg, botMsg])
+    scrollRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [eduSceneRoleId, conversation.user.id, setMessages])
+
+  /**
+   * 教育微盘卡 2（目录卡）：在当前会话里 push「用户气泡 = 打开 ${spaceName} · 教育微盘 + AI 卡 marker」。
+   * 由卡 1 行点击触发。
+   */
+  const openEduDiskFolderCardInChat = React.useCallback(
+    (spaceId: string, spaceName: string) => {
+      const role: EduSceneRole = eduSceneRoleId ?? "student"
+      const now = Date.now()
+      const userMsg: Message = {
+        id: `user-edu-disk-folder-${spaceId}-${now}`,
+        senderId: conversation.user.id,
+        content: `打开 ${spaceName} · 教育微盘`,
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        createdAt: now,
+      }
+      const botMsg: Message = {
+        id: `bot-edu-disk-folder-${spaceId}-${now + 1}`,
+        senderId: "ai-assistant",
+        content: buildEduDiskFolderCardContent(role, spaceId),
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        createdAt: now + 1,
+      }
+      setMessages((prev) => [...prev, userMsg, botMsg])
+      scrollRef.current?.scrollIntoView({ behavior: "smooth" })
+    },
+    [eduSceneRoleId, conversation.user.id, setMessages],
+  )
+
+  /**
+   * 教学资料浏览卡（统一 store 视图，含课程 / 大纲 / 课次三层）：
+   *  入口：
+   *   - EduDiskFolderCard 顶部「教学资料 · 课程文件夹」CTA
+   *   - 课程商品卡里「在微盘打开」chip → 由当前实现以文本指令记录，未来可扩展为直接 push 该卡
+   */
+  const openEduTeachingMaterialsBrowserInChat = React.useCallback(
+    (input?: { focusCourseId?: string; focusLessonKey?: string; userText?: string }) => {
+      const now = Date.now()
+      const userMsg: Message = {
+        id: `user-edu-tm-browser-${now}`,
+        senderId: conversation.user.id,
+        content: input?.userText ?? "查看教学资料",
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        createdAt: now,
+      }
+      const botMsg: Message = {
+        id: `bot-edu-tm-browser-${now + 1}`,
+        senderId: "ai-assistant",
+        content: buildEduTeachingMaterialsBrowserMarkerContent({
+          spaceOrgId: currentOrg,
+          spaceScenario: scenario,
+          focusCourseId: input?.focusCourseId,
+          focusLessonKey: input?.focusLessonKey,
+        }),
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        createdAt: now + 1,
+      }
+      setMessages((prev) => [...prev, userMsg, botMsg])
+      scrollRef.current?.scrollIntoView({ behavior: "smooth" })
+    },
+    [conversation.user.id, currentOrg, scenario, setMessages],
   )
 
   /**
    * 课中状态主动 push「课程进行中」气泡：
-   * - 触发条件：教育门户激活（activeApp === "education"）+ stage === "in" + 三身份（非 admin）
+   * - 触发条件：教育门户激活 + stage === "in" + 学生 / 家长（老师不推，见 effect 内注释）
    * - 幂等：以 `${role}|${stage}` 为 key 用 ref 去重，避免每次 state 变化重复 push
    * - 与首屏「能力地图」/ Hero 卡互补：Hero 卡讲全貌，本提醒讲"现在正在上课·一键进入"
    *
@@ -2899,6 +3295,11 @@ export function MainAIChatWindow({
     if (activeApp !== "education") return
     if (educationStage !== "in") return
     if (!eduRoleFromScenario || eduRoleFromScenario === "admin") return
+    /**
+     * 老师课中：主开场已有「欢迎语 + 4 chip」直达在线教室 / 随堂题 / 签到 / 资料，
+     * 不再自动 push「课程进行中」大卡（与产品要求一致）。
+     */
+    if (eduRoleFromScenario === "teacher") return
     const key = `${eduRoleFromScenario}|${educationStage}`
     if (pushedLiveHintKeyRef.current === key) return
     pushedLiveHintKeyRef.current = key
@@ -5214,10 +5615,24 @@ export function MainAIChatWindow({
       const isAiClassroomSkillCard = msg.content.startsWith(`${AI_CLASSROOM_SKILL_CARD_MARKER}:`)
       const isAiClassroomScheduleCard = msg.content.startsWith(`${AI_CLASSROOM_SCHEDULE_CARD_MARKER}:`)
       const isEduDockMenuCard = msg.content.startsWith(`${EDU_DOCK_MENU_CARD_MARKER}:`)
+      const isEduCourseProductsCard = msg.content.startsWith(
+        `${RENDER_EDU_COURSE_PRODUCTS_CARD_MARKER}:`,
+      )
+      const isEduCourseGoodsCard = msg.content.startsWith(
+        `${RENDER_EDU_COURSE_GOODS_CARD_MARKER}:`,
+      )
+      const isEduDiskListCard = msg.content.startsWith(`${EDU_DISK_LIST_CARD_MARKER}:`)
+      const isEduDiskFolderCard = msg.content.startsWith(`${EDU_DISK_FOLDER_CARD_MARKER}:`)
+      const isEduTeachingMaterialsBrowserCard = msg.content.startsWith(
+        `${RENDER_EDU_TEACHING_MATERIALS_BROWSER_CARD_MARKER}:`,
+      )
       const isLiveLessonHintCard = msg.content.startsWith(`${LIVE_LESSON_HINT_CARD_MARKER}:`)
       const isEduLessonPicker = msg.content.startsWith(`${EDU_LESSON_PICKER_MARKER}:`)
       const isEduCourseFulfillmentCard = msg.content.startsWith(`${EDU_COURSE_FULFILLMENT_CARD_MARKER}:`)
+      const isLessonOperationListCard = msg.content.startsWith(`${LESSON_OPERATION_LIST_CARD_MARKER}:`)
       const isAdminBusinessCard = !isMe && msg.content.startsWith(`${ADMIN_BUSINESS_CARD_MARKER}:`)
+      const isMainLessonReviewCard =
+        !isMe && msg.content.startsWith(`${MAIN_LESSON_REVIEW_CARD_MARKER}:`)
       const isAicReply = !isMe && msg.content.startsWith(`${AIC_REPLY_MARKER}:`)
       const isCreateOrgSuccess = msg.content.startsWith(`${CREATE_ORG_SUCCESS_MARKER}:`);
       const isJoinOrgForm = msg.content === JOIN_ORG_FORM_MARKER;
@@ -5252,10 +5667,17 @@ export function MainAIChatWindow({
         isAiClassroomSkillCard ||
         isAiClassroomScheduleCard ||
         isEduDockMenuCard ||
+        isEduCourseProductsCard ||
+        isEduCourseGoodsCard ||
+        isEduDiskListCard ||
+        isEduDiskFolderCard ||
+        isEduTeachingMaterialsBrowserCard ||
         isLiveLessonHintCard ||
         isEduCourseFulfillmentCard ||
+        isLessonOperationListCard ||
         isEduLessonPicker ||
         isAdminBusinessCard ||
+        isMainLessonReviewCard ||
         isAicReply ||
         isCreateOrgSuccess ||
         isJoinOrgForm ||
@@ -6408,6 +6830,272 @@ export function MainAIChatWindow({
                 {renderDockFollowUpStrip(msg)}
               </div>
             </div>
+          ) : isEduCourseProductsCard ? (
+            <div
+              className={cn(
+                "flex flex-col md:flex-row gap-[6px] md:gap-[8px] w-full md:w-[calc(100%-44px)] justify-start group",
+                hideAvatar ? "-mt-[var(--space-400)]" : "",
+              )}
+            >
+              {!hideAvatar ? (
+                <Avatar className="w-[28px] h-[28px] md:w-[36px] md:h-[36px] shrink-0">
+                  <AvatarImage src={conversation.user.avatar} />
+                </Avatar>
+              ) : (
+                <div className="hidden md:block w-[36px] shrink-0" />
+              )}
+              <div className="w-full">
+                {renderReplyOrgContextBanner(msg, isEducationContext)}
+                {(() => {
+                  const parsed = parseEduCourseProductsMarkerContent(msg.content)
+                  if (!parsed) {
+                    return (
+                      <p className="m-0 text-[length:var(--font-size-sm)] leading-relaxed text-text-secondary">
+                        课程商品卡暂时无法解析。
+                      </p>
+                    )
+                  }
+                  return (
+                    <EduCourseProductsCard
+                      payload={parsed}
+                      onPickPrompt={(prompt) => {
+                        /** 卡内行内回执（下架 / 编辑 / 删除 / 已关联商品 chevron 等） */
+                        pushUserThenBot(
+                          prompt,
+                          `已记录：${prompt}。可继续操作或返回继续浏览课程列表。`,
+                        )
+                      }}
+                      onCreateCourse={() =>
+                        openCreateCourseSidePanel({
+                          orgId: parsed.spaceOrgId,
+                          scenario: parsed.spaceScenario,
+                        })
+                      }
+                      onOpenSchedule={(courseId, mode) =>
+                        openCreateScheduleSidePanel({
+                          orgId: parsed.spaceOrgId,
+                          scenario: parsed.spaceScenario,
+                          courseId,
+                          mode,
+                        })
+                      }
+                    />
+                  )
+                })()}
+                {renderDockFollowUpStrip(msg)}
+              </div>
+            </div>
+          ) : isEduCourseGoodsCard ? (
+            <div
+              className={cn(
+                "flex flex-col md:flex-row gap-[6px] md:gap-[8px] w-full md:w-[calc(100%-44px)] justify-start group",
+                hideAvatar ? "-mt-[var(--space-400)]" : "",
+              )}
+            >
+              {!hideAvatar ? (
+                <Avatar className="w-[28px] h-[28px] md:w-[36px] md:h-[36px] shrink-0">
+                  <AvatarImage src={conversation.user.avatar} />
+                </Avatar>
+              ) : (
+                <div className="hidden md:block w-[36px] shrink-0" />
+              )}
+              <div className="w-full">
+                {renderReplyOrgContextBanner(msg, isEducationContext)}
+                {(() => {
+                  const parsed = parseEduCourseGoodsMarkerContent(msg.content)
+                  if (!parsed) {
+                    return (
+                      <p className="m-0 text-[length:var(--font-size-sm)] leading-relaxed text-text-secondary">
+                        课程商品卡暂时无法解析。
+                      </p>
+                    )
+                  }
+                  return (
+                    <EduCourseGoodsCard
+                      payload={parsed}
+                      role={
+                        eduSceneRoleId === "teacher" ||
+                        eduSceneRoleId === "student" ||
+                        eduSceneRoleId === "parent" ||
+                        eduSceneRoleId === "admin"
+                          ? eduSceneRoleId
+                          : "teacher"
+                      }
+                      onPickPrompt={(prompt) => {
+                        pushUserThenBot(
+                          prompt,
+                          `已记录：${prompt}。可继续操作或点列表行进入课程子 CUI。`,
+                        )
+                      }}
+                      onOpenCourse={(courseId) => {
+                        /**
+                         * 与 EduCourseFulfillmentCard 同款 seriesId 派生：
+                         *   seeded（id=`course-series-...`）→ 去掉 `course-` 在 DEMO 表里查
+                         *   非 seeded → 走 `synth-${courseId}` 兜底，让父级用 buildSeriesFromCourse 合成
+                         */
+                        const seriesId = courseId.startsWith("course-series-")
+                          ? courseId.replace(/^course-/, "")
+                          : `synth-${courseId}`
+                        openAiClassroomSeriesSidePanel({
+                          seriesId,
+                          source: "schedule",
+                        })
+                      }}
+                    />
+                  )
+                })()}
+                {renderDockFollowUpStrip(msg)}
+              </div>
+            </div>
+          ) : isEduDiskListCard ? (
+            <div
+              className={cn(
+                "flex flex-col md:flex-row gap-[6px] md:gap-[8px] w-full md:w-[calc(100%-44px)] justify-start group",
+                hideAvatar ? "-mt-[var(--space-400)]" : "",
+              )}
+            >
+              {!hideAvatar ? (
+                <Avatar className="w-[28px] h-[28px] md:w-[36px] md:h-[36px] shrink-0">
+                  <AvatarImage src={conversation.user.avatar} />
+                </Avatar>
+              ) : (
+                <div className="hidden md:block w-[36px] shrink-0" />
+              )}
+              <div className="w-full">
+                {renderReplyOrgContextBanner(msg, isEducationContext)}
+                {(() => {
+                  const parsed = parseEduDiskListCardContent(msg.content)
+                  if (!parsed) {
+                    return (
+                      <p className="m-0 text-[length:var(--font-size-sm)] leading-relaxed text-text-secondary">
+                        教育微盘暂时无法解析。
+                      </p>
+                    )
+                  }
+                  const data = getEduDiskListData(parsed.role, scenario)
+                  return (
+                    <EduDiskListCard
+                      data={data}
+                      onOpenSpace={(item) =>
+                        openEduDiskFolderCardInChat(item.spaceId, item.spaceName)
+                      }
+                      onCreateSpace={() => handleSendMessage("创建教育空间")}
+                      onJoinSpace={() => handleSendMessage("加入教育空间")}
+                    />
+                  )
+                })()}
+                {renderDockFollowUpStrip(msg)}
+              </div>
+            </div>
+          ) : isEduDiskFolderCard ? (
+            <div
+              className={cn(
+                "flex flex-col md:flex-row gap-[6px] md:gap-[8px] w-full md:w-[calc(100%-44px)] justify-start group",
+                hideAvatar ? "-mt-[var(--space-400)]" : "",
+              )}
+            >
+              {!hideAvatar ? (
+                <Avatar className="w-[28px] h-[28px] md:w-[36px] md:h-[36px] shrink-0">
+                  <AvatarImage src={conversation.user.avatar} />
+                </Avatar>
+              ) : (
+                <div className="hidden md:block w-[36px] shrink-0" />
+              )}
+              <div className="w-full">
+                {renderReplyOrgContextBanner(msg, isEducationContext)}
+                {(() => {
+                  const parsed = parseEduDiskFolderCardContent(msg.content)
+                  if (!parsed) {
+                    return (
+                      <p className="m-0 text-[length:var(--font-size-sm)] leading-relaxed text-text-secondary">
+                        教育微盘目录暂时无法解析。
+                      </p>
+                    )
+                  }
+                  const data = getEduDiskFolderData(parsed.role, parsed.spaceId, scenario)
+                  if (!data) {
+                    return (
+                      <p className="m-0 text-[length:var(--font-size-sm)] leading-relaxed text-text-secondary">
+                        该教育空间已不存在。点击下方「返回教育微盘列表」回到列表。
+                      </p>
+                    )
+                  }
+                  return (
+                    <EduDiskFolderCard
+                      data={data}
+                      onOpenFolder={(folder) => {
+                        pushUserThenBot(
+                          `打开 ${folder.name}`,
+                          `已为你聚焦「${folder.name}」（${folder.fileCount} 个文件）。当前展示该文件夹下最近 ${folder.recentFiles.length} 个文件预览，详细列表稍后我会一次性给你。`,
+                        )
+                      }}
+                      onPickPrompt={(prompt) => {
+                        pushUserThenBot(
+                          prompt,
+                          `已记录：${prompt}。我会按当前空间「${data.spaceName}」继续推进。`,
+                        )
+                      }}
+                      onBackToList={() => openEduDiskListCardInChat()}
+                      onEnterTeachingMaterials={() =>
+                        openEduTeachingMaterialsBrowserInChat({
+                          userText: `进入「${data.spaceName} · 教育微盘 / 教学资料」`,
+                        })
+                      }
+                      onUploadFile={() =>
+                        pushUserThenBot(
+                          "上传文件到根目录",
+                          `已为你打开上传通道（${data.spaceName} · 根目录）。如果是某节课的资料，建议先进入「教学资料 / {课程} / 第 N 节」，避免后续整理。`,
+                        )
+                      }
+                      onCreateFolder={() =>
+                        pushUserThenBot(
+                          "新建文件夹",
+                          `已在 ${data.spaceName} · 根目录新建占位文件夹（待重命名）。如果想按课程组织，建议直接使用「教学资料」目录。`,
+                        )
+                      }
+                    />
+                  )
+                })()}
+                {renderDockFollowUpStrip(msg)}
+              </div>
+            </div>
+          ) : isEduTeachingMaterialsBrowserCard ? (
+            <div
+              className={cn(
+                "flex flex-col md:flex-row gap-[6px] md:gap-[8px] w-full md:w-[calc(100%-44px)] justify-start group",
+                hideAvatar ? "-mt-[var(--space-400)]" : "",
+              )}
+            >
+              {!hideAvatar ? (
+                <Avatar className="w-[28px] h-[28px] md:w-[36px] md:h-[36px] shrink-0">
+                  <AvatarImage src={conversation.user.avatar} />
+                </Avatar>
+              ) : (
+                <div className="hidden md:block w-[36px] shrink-0" />
+              )}
+              <div className="w-full">
+                {renderReplyOrgContextBanner(msg, isEducationContext)}
+                {(() => {
+                  const parsed = parseEduTeachingMaterialsBrowserMarkerContent(msg.content)
+                  if (!parsed) {
+                    return (
+                      <p className="m-0 text-[length:var(--font-size-sm)] leading-relaxed text-text-secondary">
+                        教学资料浏览卡暂时无法解析。
+                      </p>
+                    )
+                  }
+                  return (
+                    <EduTeachingMaterialsBrowserCard
+                      payload={parsed}
+                      onPickPrompt={(prompt) => {
+                        pushUserThenBot(prompt, `已记录：${prompt}。`)
+                      }}
+                    />
+                  )
+                })()}
+                {renderDockFollowUpStrip(msg)}
+              </div>
+            </div>
           ) : isEduCourseFulfillmentCard ? (
             <div
               className={cn(
@@ -6434,10 +7122,205 @@ export function MainAIChatWindow({
                     <EduCourseFulfillmentCard
                       role={role}
                       educationStage={educationStage}
-                      onOpenSeries={(seriesId) => {
+                      ctx={{
+                        orgId: currentOrg,
+                        scenario,
+                      }}
+                      onOpenSeries={(seriesId, hint) => {
+                        const mapFulfillmentActionToCommand = (
+                          actionLabel: string | undefined,
+                          viewerRole: EduSceneRole,
+                        ): { command: string; kind: "skill" | "open-only" } | null => {
+                          if (!actionLabel) return null
+                          if (actionLabel === "资料") return { command: "看本节课资料", kind: "skill" }
+                          if (actionLabel === "签到") {
+                            if (viewerRole === "teacher") return { command: "看本周签到明细", kind: "skill" }
+                            if (viewerRole === "student") return { command: "看我的签到记录", kind: "skill" }
+                            return { command: "看孩子的签到记录", kind: "skill" }
+                          }
+                          if (actionLabel === "请假") {
+                            if (viewerRole === "teacher") return { command: "查看本节请假情况", kind: "skill" }
+                            if (viewerRole === "student") return { command: "我要请假", kind: "skill" }
+                            return { command: "代孩子请假", kind: "skill" }
+                          }
+                          if (actionLabel === "作业") {
+                            if (viewerRole === "teacher") return { command: "布置今晚作业", kind: "skill" }
+                            if (viewerRole === "student") return { command: "我的作业", kind: "skill" }
+                            return { command: "看孩子今晚作业", kind: "skill" }
+                          }
+                          if (actionLabel === "风采点评") {
+                            return {
+                              command: viewerRole === "teacher" ? "风采点评" : "风采报告",
+                              kind: "skill",
+                            }
+                          }
+                          if (actionLabel === "沟通") {
+                            if (viewerRole === "teacher") return { command: "给学生家长发消息", kind: "skill" }
+                            if (viewerRole === "student") return { command: "私聊老师", kind: "skill" }
+                            return { command: "和王老师私聊", kind: "skill" }
+                          }
+                          return null
+                        }
+                        /**
+                         * "履约卡 → 子CUI 状态对齐" 处理：
+                         *
+                         * 履约卡 row 的状态来自真实时间（Date.now() vs occurrence 时间），
+                         * 子 CUI 的欢迎语 / 价值卡 / chip 由 `educationStage` 驱动，
+                         * 两者本来不联动 → 容易出现"卡片显示待开始，进去就是已完课"的语义打架。
+                         *
+                         * 修复策略：所有系列（不论主线 / 非主线、seed / 用户创建）打开时，
+                         * 都把 hint.runtimeStatus 映射到 EducationStage 并同步：
+                         *   completed → post / in → in / soon | pending → pre
+                         *
+                         * 配合 `AiClassroomSideConversationPanel` 内的 stageOverridden 机制，
+                         * 父级 hint 切 stage 之后，子 panel 的 effectiveStage 立即跟随 stage，
+                         * 不再被 outline staticStatus 锁定，从而欢迎语 / 卡片与履约卡保持一致。
+                         */
+                        if (hint?.runtimeStatus && onEducationStageChange) {
+                          const desired: EducationStage =
+                            hint.runtimeStatus === "in"
+                              ? "in"
+                              : hint.runtimeStatus === "completed"
+                                ? "post"
+                                : "pre"
+                          if (desired !== educationStage) {
+                            onEducationStageChange(desired)
+                          }
+                        }
+                        const openCommand = mapFulfillmentActionToCommand(hint?.actionLabel, role)
                         openAiClassroomSeriesSidePanel({
                           seriesId,
                           source: "schedule",
+                          targetOutlineIndex: hint?.lessonNumber,
+                          command: openCommand?.command,
+                          kind: openCommand?.kind,
+                        })
+                      }}
+                    />
+                  )
+                })()}
+                {renderDockFollowUpStrip(msg)}
+              </div>
+            </div>
+          ) : isLessonOperationListCard ? (
+            <div
+              className={cn(
+                "flex flex-col md:flex-row gap-[6px] md:gap-[8px] w-full md:w-[calc(100%-44px)] justify-start group",
+                hideAvatar ? "-mt-[var(--space-400)]" : "",
+              )}
+            >
+              {!hideAvatar ? (
+                <Avatar className="w-[28px] h-[28px] md:w-[36px] md:h-[36px] shrink-0">
+                  <AvatarImage src={conversation.user.avatar} />
+                </Avatar>
+              ) : (
+                <div className="hidden md:block w-[36px] shrink-0" />
+              )}
+              <div className="w-full">
+                {renderReplyOrgContextBanner(msg, isEducationContext)}
+                {(() => {
+                  const parsed = parseLessonOperationListCardContent(msg.content)
+                  if (!parsed) {
+                    return (
+                      <p className="m-0 text-[length:var(--font-size-sm)] leading-relaxed text-text-secondary">
+                        教学管理列表卡解析失败。
+                      </p>
+                    )
+                  }
+                  /**
+                   * 行点击 → 子 CUI 命令映射：完全复用履约卡同款映射，
+                   * 让「教学管理 → 资料 / 考勤 / 作业 / 风采」与「履约卡 → 同款图标」殊途同归到同一张子卡。
+                   * （映射函数与履约卡分支内联定义一致；此处独立一份，避免跨分支耦合。）
+                   *
+                   * `actionLabel` 优先级高于 `kind` 默认动作：考勤行展开后，单条学员的
+                   * "请假" / "调课" 通过透传 actionOverride 让 hint.actionLabel 变成
+                   * "请假" / "调课"（而不是默认的"签到"），这里就把它路由到对应子卡。
+                   * 对应子 CUI `AiClassroomSideConversationPanel` 已有命令解析（见 isLeavePrompt /
+                   * isReschedulePrompt 分支）→ push 请假卡 / 调课卡，不再回退到签到卡。
+                   */
+                  const mapToCommand = (
+                    kind: typeof parsed.kind,
+                    actionLabel: string | undefined,
+                    viewerRole: EduSceneRole,
+                  ): { command: string; kind: "skill" | "open-only" } | null => {
+                    if (actionLabel === "请假") {
+                      if (viewerRole === "teacher" || viewerRole === "admin")
+                        return { command: "查看本节请假情况", kind: "skill" }
+                      if (viewerRole === "student") return { command: "我要请假", kind: "skill" }
+                      return { command: "代孩子请假", kind: "skill" }
+                    }
+                    if (actionLabel === "调课") {
+                      if (viewerRole === "teacher" || viewerRole === "admin")
+                        return { command: "发起调课并通知学生家长", kind: "skill" }
+                      if (viewerRole === "student") return { command: "申请调课", kind: "skill" }
+                      return { command: "代孩子发起调课申请", kind: "skill" }
+                    }
+                    if (kind === "materials") return { command: "看本节课资料", kind: "skill" }
+                    if (kind === "attendance") {
+                      if (viewerRole === "teacher" || viewerRole === "admin")
+                        return { command: "看本周签到明细", kind: "skill" }
+                      if (viewerRole === "student")
+                        return { command: "看我的签到记录", kind: "skill" }
+                      return { command: "看孩子的签到记录", kind: "skill" }
+                    }
+                    if (kind === "homework") {
+                      if (viewerRole === "teacher" || viewerRole === "admin")
+                        return { command: "布置今晚作业", kind: "skill" }
+                      if (viewerRole === "student")
+                        return { command: "我的作业", kind: "skill" }
+                      return { command: "看孩子今晚作业", kind: "skill" }
+                    }
+                    return {
+                      command:
+                        viewerRole === "teacher" || viewerRole === "admin"
+                          ? "风采点评"
+                          : "风采报告",
+                      kind: "skill",
+                    }
+                  }
+                  return (
+                    <LessonOperationListCard
+                      role={parsed.role}
+                      kind={parsed.kind}
+                      ctx={{ orgId: currentOrg, scenario }}
+                      onOpenSeries={(seriesId, hint) => {
+                        const openCommand = mapToCommand(
+                          parsed.kind,
+                          hint.actionLabel,
+                          parsed.role,
+                        )
+                        /**
+                         * 「教学管理列表卡 → 子CUI 状态对齐」
+                         *
+                         * 与履约卡 ↑ 同款机制：本卡 row 状态来自真实时间
+                         * （deriveStatus(occurrence, nowTs)），子 CUI 的欢迎语 / 价值卡 / chip
+                         * 由 `educationStage` 驱动；不联动会出现「卡片显示上课中，进去就是
+                         * 已完课」的语义打架。
+                         *
+                         * 透下来的 `hint.runtimeStatus` 映射到 EducationStage 并同步：
+                         *   completed → post / in → in / soon | pending → pre
+                         *
+                         * 配合 `AiClassroomSideConversationPanel` 的 stageOverridden 机制，
+                         * 父级切 stage 之后子 panel 的 effectiveStage 立即跟随，
+                         * 风采 / 资料 / 考勤 / 作业 4 张子卡都会按目标 stage 路由到正确子型。
+                         */
+                        if (hint.runtimeStatus && onEducationStageChange) {
+                          const desired: EducationStage =
+                            hint.runtimeStatus === "in"
+                              ? "in"
+                              : hint.runtimeStatus === "completed"
+                                ? "post"
+                                : "pre"
+                          if (desired !== educationStage) {
+                            onEducationStageChange(desired)
+                          }
+                        }
+                        openAiClassroomSeriesSidePanel({
+                          seriesId,
+                          source: "schedule",
+                          targetOutlineIndex: hint.lessonNumber,
+                          command: openCommand?.command,
+                          kind: openCommand?.kind,
                         })
                       }}
                     />
@@ -6534,6 +7417,49 @@ export function MainAIChatWindow({
                           source: "user",
                         })
                       }
+                    />
+                  )
+                })()}
+                {renderDockFollowUpStrip(msg)}
+              </div>
+            </div>
+          ) : isMainLessonReviewCard ? (
+            /**
+             * 主对话内嵌「风采报告卡」（学生 / 家长侧）：
+             * - 由 IM banner 点击「老师已发送《xxx》风采报告」触发：encodeMainLessonReviewMarker
+             * - 直接复用 `LessonReviewCard`，stage 固定为 "post"（IM 消息本身代表已发送的报告），
+             *   role 来自 marker，lessonId / lessonTitle 直接从 marker payload 取
+             */
+            <div
+              className={cn(
+                "flex flex-col md:flex-row gap-[6px] md:gap-[8px] w-full md:w-[calc(100%-44px)] justify-start group",
+                hideAvatar ? "-mt-[var(--space-400)]" : "",
+              )}
+            >
+              {!hideAvatar ? (
+                <Avatar className="w-[28px] h-[28px] md:w-[36px] md:h-[36px] shrink-0">
+                  <AvatarImage src={conversation.user.avatar} />
+                </Avatar>
+              ) : (
+                <div className="hidden md:block w-[36px] shrink-0" />
+              )}
+              <div className="w-full">
+                {renderReplyOrgContextBanner(msg, isEducationContext)}
+                {(() => {
+                  const parsed = parseMainLessonReviewMarker(msg.content)
+                  if (!parsed) {
+                    return (
+                      <p className="m-0 text-[length:var(--font-size-sm)] leading-relaxed text-text-secondary">
+                        这条消息暂时无法显示，请刷新页面重试。
+                      </p>
+                    )
+                  }
+                  return (
+                    <LessonReviewCard
+                      role={parsed.role}
+                      lessonId={parsed.lessonId}
+                      lessonTitle={parsed.lessonTitle}
+                      stage="post"
                     />
                   )
                 })()}
@@ -7902,7 +8828,7 @@ export function MainAIChatWindow({
                       <EduImInboxBanner
                         role={eduSceneRoleId}
                         events={eduImBusEvents}
-                        onOpenDetail={handleEduRoleSkillCommand}
+                        onOpenDetail={handleEduImInboxOpen}
                       />
                     ) : null}
                     {/*
@@ -8264,18 +9190,35 @@ export function MainAIChatWindow({
 
                 {/* 当前应用的快捷业务指令 */}
                 <div className="flex min-w-0 flex-1 items-center gap-[var(--space-200)] overflow-x-auto scrollbar-hide">
-                  {getDockBarInlineShortcuts(shortcutBarAppId).map((text) => (
-                    <button
-                      key={text}
-                      type="button"
-                      onClick={() => handleSendMessage(text)}
-                      className="bg-bg flex h-[var(--space-800)] shrink-0 cursor-pointer select-none items-center gap-[var(--space-100)] rounded-full border border-border px-[var(--space-300)] py-[var(--space-150)] transition-all duration-300 ease-out hover:bg-[var(--black-alpha-11)]"
-                    >
-                      <p className="text-[length:var(--font-size-xs)] font-[var(--font-weight-medium)] leading-none whitespace-nowrap text-[var(--color-text)]">
-                        {text}
-                      </p>
-                    </button>
-                  ))}
+                  {getDockBarInlineShortcuts(shortcutBarAppId).map((text) => {
+                    /** 教育微盘：特殊 chip——前置毕业帽图标 + 直接出卡片，不走 handleSendMessage */
+                    const isEduDiskEntry = isEduDiskEntryCommand(text)
+                    return (
+                      <button
+                        key={text}
+                        type="button"
+                        onClick={() => {
+                          if (isEduDiskEntry) {
+                            openEduDiskListCardInChat()
+                            return
+                          }
+                          handleSendMessage(text)
+                        }}
+                        className="bg-bg flex h-[var(--space-800)] shrink-0 cursor-pointer select-none items-center gap-[var(--space-100)] rounded-full border border-border px-[var(--space-300)] py-[var(--space-150)] transition-all duration-300 ease-out hover:bg-[var(--black-alpha-11)]"
+                      >
+                        {isEduDiskEntry ? (
+                          <GraduationCap
+                            aria-hidden
+                            className="size-[12px] shrink-0 text-[var(--color-info)]"
+                            strokeWidth={1.75}
+                          />
+                        ) : null}
+                        <p className="text-[length:var(--font-size-xs)] font-[var(--font-weight-medium)] leading-none whitespace-nowrap text-[var(--color-text)]">
+                          {text}
+                        </p>
+                      </button>
+                    )
+                  })}
                 </div>
               </motion.div>
             ) : (
@@ -8626,7 +9569,7 @@ export function MainAIChatWindow({
                                     <EduImInboxBanner
                                       role={eduSceneRoleId}
                                       events={eduImBusEvents}
-                                      onOpenDetail={handleEduRoleSkillCommand}
+                                      onOpenDetail={handleEduImInboxOpen}
                                     />
                                   ) : null}
                                   {eduSceneRoleId === "student" && studentClassTasks.length > 0 ? (
@@ -9002,9 +9945,165 @@ export function MainAIChatWindow({
                     onClose={closeAiClassroomSidePanel}
                     onStageChange={onEducationStageChange}
                     onOpenLiveClass={() => openAiClassroomLiveWindow(aiClassroomLessonId)}
+                    spaceOrgId={currentOrg}
+                    spaceScenario={scenario}
                   />
                 )
               })()}
+            </motion.div>
+          </>
+        ) : null}
+
+        {/* 创建课程子 CUI（替代旧的 CreateCourseSheet 弹窗） */}
+        {createCourseSideOpen && createCourseSideCtx ? (
+          <>
+            <motion.div
+              key="create-course-side-overlay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="pointer-events-auto absolute inset-0 z-[199] bg-[rgba(15,23,42,0.45)]"
+              aria-hidden
+              onClick={closeCreateCourseSidePanel}
+            />
+            <motion.div
+              key={`create-course-side-panel-${createCourseSideCtx.orgId}`}
+              initial={{ x: 36, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 28, opacity: 0 }}
+              transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+              className="absolute inset-y-0 right-0 z-[200] flex w-[min(100%,720px)] max-w-full min-w-0 justify-end"
+            >
+              <CreateCourseSideConversationPanel
+                ctx={{
+                  orgId: createCourseSideCtx.orgId,
+                  scenario: createCourseSideCtx.scenario,
+                }}
+                botAvatarSrc={conversation.user.avatar}
+                onClose={closeCreateCourseSidePanel}
+                onCreated={(summary) => {
+                  /**
+                   * 创建完成后把摘要推回教育门户主对话；列表 store 订阅会自动出现新课。
+                   *
+                   * 注意：这里直接用组件作用域内的 `setEducationMessages`，
+                   *      不能引用 `renderMessageList` 内部声明的 `pushUserThenBot`
+                   *      （它对本 JSX 不在作用域里 → 运行时抛错 → onClose 跑不到 → 侧栏关不掉）
+                   */
+                  const now = Date.now()
+                  const stamp = new Date().toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                  setEducationMessages((prev) => [
+                    ...prev,
+                    {
+                      id: `cui-create-course-u-${now}`,
+                      senderId: currentUser.id,
+                      content: "创建新课程",
+                      timestamp: stamp,
+                      createdAt: now,
+                    },
+                  ])
+                  window.setTimeout(() => {
+                    const ts2 = new Date().toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                    setEducationMessages((prev) => [
+                      ...prev,
+                      {
+                        id: `cui-create-course-b-${Date.now()}`,
+                        senderId: conversation.user.id,
+                        content: summary,
+                        timestamp: ts2,
+                        createdAt: Date.now(),
+                        isAfterPrompt: true,
+                      },
+                    ])
+                  }, 360)
+                }}
+              />
+            </motion.div>
+          </>
+        ) : null}
+
+        {/*
+         * 创建排课表子 CUI（与创建课程子 CUI 同款外壳 / 同款 motion）
+         * 触发：EduCourseProductsCard 行内「添加排课表 / 打开排课表」CTA 与右下"添加排课"图标
+         * 关闭：用户取消 / 提交完成
+         * 数据：CreateScheduleSideConversationPanel 内自建草稿、订阅 store；
+         *      finalize 后 store 通知到 EduCourseProductsCard 与 EduCourseFulfillmentCard。
+         */}
+        {createScheduleSideOpen && createScheduleSideCtx ? (
+          <>
+            <motion.div
+              key="create-schedule-side-overlay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="pointer-events-auto absolute inset-0 z-[199] bg-[rgba(15,23,42,0.45)]"
+              aria-hidden
+              onClick={closeCreateScheduleSidePanel}
+            />
+            <motion.div
+              key={`create-schedule-side-panel-${createScheduleSideCtx.orgId}-${createScheduleSideCtx.courseId}`}
+              initial={{ x: 36, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 28, opacity: 0 }}
+              transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+              className="absolute inset-y-0 right-0 z-[200] flex w-[min(100%,820px)] max-w-full min-w-0 justify-end"
+            >
+              <CreateScheduleSideConversationPanel
+                ctx={{
+                  orgId: createScheduleSideCtx.orgId,
+                  scenario: createScheduleSideCtx.scenario,
+                }}
+                courseId={createScheduleSideCtx.courseId}
+                mode={createScheduleSideCtx.mode}
+                botAvatarSrc={conversation.user.avatar}
+                onClose={closeCreateScheduleSidePanel}
+                onCreated={(summary) => {
+                  /**
+                   * 同 CreateCourseSideConversationPanel：直接用组件作用域内的
+                   * setEducationMessages 推回执；不要引用 renderMessageList 内的辅助函数
+                   * 以免重蹈"作用域错位 → onClose 跑不到 → 侧栏关不掉"的覆辙。
+                   */
+                  const now = Date.now()
+                  const stamp = new Date().toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                  setEducationMessages((prev) => [
+                    ...prev,
+                    {
+                      id: `cui-create-schedule-u-${now}`,
+                      senderId: currentUser.id,
+                      content: "创建排课表",
+                      timestamp: stamp,
+                      createdAt: now,
+                    },
+                  ])
+                  window.setTimeout(() => {
+                    const ts2 = new Date().toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                    setEducationMessages((prev) => [
+                      ...prev,
+                      {
+                        id: `cui-create-schedule-b-${Date.now()}`,
+                        senderId: conversation.user.id,
+                        content: summary,
+                        timestamp: ts2,
+                        createdAt: Date.now(),
+                        isAfterPrompt: true,
+                      },
+                    ])
+                  }, 360)
+                }}
+              />
             </motion.div>
           </>
         ) : null}
@@ -9034,7 +10133,20 @@ export function MainAIChatWindow({
               className="absolute inset-y-0 right-0 z-[200] flex w-[min(100%,720px)] max-w-full min-w-0 justify-end"
             >
               {(() => {
-                const series = findLessonSeries(aiClassroomSeriesId)
+                /**
+                 * 解析 seriesId：
+                 *  1) demo seeded 系列 → findLessonSeries 命中
+                 *  2) 新课程合成系列 → findLessonSeries 失败时，从 store 反查 course 并
+                 *     用 buildSeriesFromCourse 合成一份"类系列"数据驱动 panel
+                 */
+                let series = findLessonSeries(aiClassroomSeriesId)
+                if (!series) {
+                  const course = findCourseBySeriesId(
+                    { orgId: currentOrg, scenario },
+                    aiClassroomSeriesId,
+                  )
+                  if (course) series = buildSeriesFromCourse(course)
+                }
                 if (!series) return null
                 return (
                   <AiClassroomSeriesSideConversationPanel
@@ -9050,6 +10162,8 @@ export function MainAIChatWindow({
                     onStageChange={onEducationStageChange}
                     deliveryMode={lessonDeliveryMode}
                     onOpenLiveClass={() => openAiClassroomLiveWindow(DEMO_LESSON.id)}
+                    spaceOrgId={currentOrg}
+                    spaceScenario={scenario}
                   />
                 )
               })()}

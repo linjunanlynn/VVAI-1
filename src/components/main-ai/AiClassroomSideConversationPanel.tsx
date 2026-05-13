@@ -94,6 +94,41 @@ function parseClassTaskPushedContent(
   return { targetRole: targetRole as EduImTargetRole, text }
 }
 
+/**
+ * 课程子 CUI 操作卡 marker：
+ * - 签到卡：`<<<RENDER_LESSON_ATTENDANCE_CARD>>>:<role>:<lessonId>`
+ * - 调课卡：`<<<RENDER_LESSON_RESCHEDULE_CARD>>>:<role>:<lessonId>`
+ * - 请假卡：`<<<RENDER_LESSON_LEAVE_CARD>>>:<role>:<lessonId>`
+ */
+const RENDER_LESSON_ATTENDANCE_CARD_MARKER = "<<<RENDER_LESSON_ATTENDANCE_CARD>>>"
+const RENDER_LESSON_RESCHEDULE_CARD_MARKER = "<<<RENDER_LESSON_RESCHEDULE_CARD>>>"
+const RENDER_LESSON_LEAVE_CARD_MARKER = "<<<RENDER_LESSON_LEAVE_CARD>>>"
+const RENDER_LESSON_REVIEW_CARD_MARKER = "<<<RENDER_LESSON_REVIEW_CARD>>>"
+
+function buildLessonOperationCardContent(
+  marker: string,
+  role: EduLessonAttendingRole,
+  lessonId: string,
+): string {
+  return `${marker}:${role}:${lessonId}`
+}
+
+function parseLessonOperationCardContent(
+  content: string,
+  marker: string,
+): { role: EduLessonAttendingRole; lessonId: string } | null {
+  const prefix = `${marker}:`
+  if (!content.startsWith(prefix)) return null
+  const rest = content.slice(prefix.length)
+  const firstColon = rest.indexOf(":")
+  if (firstColon < 0) return null
+  const roleRaw = rest.slice(0, firstColon)
+  const lessonId = rest.slice(firstColon + 1).trim()
+  if (!lessonId) return null
+  if (roleRaw !== "teacher" && roleRaw !== "student" && roleRaw !== "parent") return null
+  return { role: roleRaw, lessonId }
+}
+
 /** 与 MainAIChatWindow 同一套 bespoke 卡片解析（侧边面板内复用） */
 function renderBespokeSkillCard(
   bespokeId: string,
@@ -151,12 +186,7 @@ import {
 } from "./aiClassroomLiveMoment"
 import { AiClassroomLiveMomentCard } from "./AiClassroomLiveMomentCard"
 import { LiveClassEntryStrip } from "./LiveClassEntryStrip"
-import {
-  buildValueCardContent,
-  getAiClassroomValueCard,
-  parseValueCardMarker,
-  hasAiClassroomValueCard,
-} from "./aiClassroomValueCards"
+import { getAiClassroomValueCard, parseValueCardMarker } from "./aiClassroomValueCards"
 import { AiClassroomValueCard } from "./AiClassroomValueCard"
 import { triggerSkillIm, type EduImTargetRole } from "./eduImBus"
 import {
@@ -206,6 +236,30 @@ import {
   SeriesLeaveFormCard,
   SeriesLeaveDoneCard,
 } from "./AiClassroomSeriesCards"
+import {
+  LessonMaterialsCard,
+  RENDER_AIC_MATERIAL_CARD_MARKER,
+  buildLessonMaterialsMarkerContent,
+  parseLessonMaterialsMarkerContent,
+  type LessonMaterialsMarkerPayload,
+} from "./LessonMaterialsCard"
+import {
+  RENDER_TEACHER_LESSON_PREP_READY_CARD_MARKER,
+  TeacherLessonPrepReadyCard,
+  buildTeacherLessonPrepReadyMarkerContent,
+  parseTeacherLessonPrepReadyMarkerContent,
+  type TeacherLessonPrepReadyMarkerPayload,
+  type TeacherLessonPrepRuntimeHint,
+} from "./TeacherLessonPrepReadyCard"
+import { LessonAttendanceCard } from "./LessonAttendanceCard"
+import { LessonRescheduleCard } from "./LessonRescheduleCard"
+import { LessonLeaveCard } from "./LessonLeaveCard"
+import { LessonReviewCard } from "./LessonReviewCard"
+import {
+  LessonHomeworkCard,
+  buildLessonHomeworkMarkerContent,
+  parseLessonHomeworkMarkerContent,
+} from "./LessonHomeworkCard"
 
 /** 系列 marker 渲染共用 bot row 容器（与系列 panel 内 BotRow 同结构） */
 function SeriesBotRow({
@@ -259,6 +313,8 @@ export interface AiClassroomSidePanelOpenRequest {
 
 function MessageBubble({
   msg,
+  role,
+  stage,
   botAvatarSrc,
   userAvatarSrc,
   userDisplayName,
@@ -270,8 +326,13 @@ function MessageBubble({
   onAnsweredQuiz,
   seriesContext,
   onPushAi,
+  lessonId,
+  lessonTitle,
 }: {
   msg: Message
+  /** 当前身份：用于资料卡这类按身份合并 fixture / 上传清单的 marker 渲染 */
+  role: EduLessonAttendingRole
+  stage: EducationStage
   botAvatarSrc: string
   userAvatarSrc: string
   userDisplayName: string
@@ -293,6 +354,8 @@ function MessageBubble({
    * 用于系列表单提交后 push 回执卡 marker、取消时 push 一句 AI 反馈等。
    */
   onPushAi?: (content: string) => void
+  lessonId: string
+  lessonTitle: string
 }) {
   const isUser = msg.senderId === currentUser.id
 
@@ -526,6 +589,126 @@ function MessageBubble({
 
   /** 课堂随堂题已发出确认条（老师视角） */
   if (!isUser && typeof msg.content === "string") {
+    const attendanceMarker = parseLessonOperationCardContent(
+      msg.content,
+      RENDER_LESSON_ATTENDANCE_CARD_MARKER,
+    )
+    if (attendanceMarker) {
+      return (
+        <div className="flex w-full flex-row items-start justify-start gap-2 md:gap-[8px]">
+          <Avatar className="mt-0.5 size-7 shrink-0 md:size-9">
+            <AvatarImage src={botAvatarSrc} />
+            <AvatarFallback>AI</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <LessonAttendanceCard
+              role={attendanceMarker.role}
+              lessonId={attendanceMarker.lessonId}
+              lessonTitle={lessonTitle}
+            />
+          </div>
+        </div>
+      )
+    }
+    const rescheduleMarker = parseLessonOperationCardContent(
+      msg.content,
+      RENDER_LESSON_RESCHEDULE_CARD_MARKER,
+    )
+    if (rescheduleMarker) {
+      return (
+        <div className="flex w-full flex-row items-start justify-start gap-2 md:gap-[8px]">
+          <Avatar className="mt-0.5 size-7 shrink-0 md:size-9">
+            <AvatarImage src={botAvatarSrc} />
+            <AvatarFallback>AI</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <LessonRescheduleCard
+              role={rescheduleMarker.role}
+              lessonId={rescheduleMarker.lessonId}
+              lessonTitle={lessonTitle}
+            />
+          </div>
+        </div>
+      )
+    }
+    const leaveMarker = parseLessonOperationCardContent(
+      msg.content,
+      RENDER_LESSON_LEAVE_CARD_MARKER,
+    )
+    if (leaveMarker) {
+      return (
+        <div className="flex w-full flex-row items-start justify-start gap-2 md:gap-[8px]">
+          <Avatar className="mt-0.5 size-7 shrink-0 md:size-9">
+            <AvatarImage src={botAvatarSrc} />
+            <AvatarFallback>AI</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <LessonLeaveCard
+              role={leaveMarker.role}
+              lessonId={leaveMarker.lessonId}
+              lessonTitle={lessonTitle}
+            />
+          </div>
+        </div>
+      )
+    }
+    const reviewMarker = parseLessonOperationCardContent(
+      msg.content,
+      RENDER_LESSON_REVIEW_CARD_MARKER,
+    )
+    if (reviewMarker) {
+      return (
+        <div className="flex w-full flex-row items-start justify-start gap-2 md:gap-[8px]">
+          <Avatar className="mt-0.5 size-7 shrink-0 md:size-9">
+            <AvatarImage src={botAvatarSrc} />
+            <AvatarFallback>AI</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <LessonReviewCard
+              role={reviewMarker.role}
+              lessonId={reviewMarker.lessonId}
+              lessonTitle={lessonTitle}
+              stage={stage}
+              onPushAi={onPushAi}
+            />
+          </div>
+        </div>
+      )
+    }
+    /**
+     * 作业卡 marker：`<<<RENDER_AIC_HOMEWORK_CARD>>>:<role>:<lessonId>`
+     * 由 `executeSkill` / `handleRecommendedPrompt` 拦截"布置今晚作业 / 我的作业 / 看孩子今晚作业 / 批改作业"等命令时 push。
+     */
+    const homeworkMarker = parseLessonHomeworkMarkerContent(msg.content)
+    if (homeworkMarker) {
+      /** effectiveStage 从 panel 当前 stage 推导（pre/in/post），强绑作业阶段 */
+      const homeworkStage: "pre" | "in" | "post" =
+        stage === "in"
+          ? "in"
+          : stage === "past"
+            ? "post"
+            : "pre"
+      return (
+        <div className="flex w-full flex-row items-start justify-start gap-2 md:gap-[8px]">
+          <Avatar className="mt-0.5 size-7 shrink-0 md:size-9">
+            <AvatarImage src={botAvatarSrc} />
+            <AvatarFallback>AI</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <LessonHomeworkCard
+              role={homeworkMarker.role}
+              lessonId={homeworkMarker.lessonId}
+              lessonTitle={lessonTitle}
+              courseName={seriesContext?.series.name ?? lessonTitle}
+              subject={seriesContext?.series.subject}
+              effectiveStage={homeworkStage}
+              teacherName={seriesContext?.series.teacher}
+            />
+          </div>
+        </div>
+      )
+    }
+
     const pushed = parseClassTaskPushedContent(msg.content)
     if (pushed) {
       return (
@@ -666,6 +849,82 @@ function MessageBubble({
     )
   }
 
+  /** 资料卡 marker：`<<<RENDER_AIC_MATERIAL_CARD>>>:<json>` —— 教师点「资料」时由 executeSkill 推入 */
+  if (
+    !isUser &&
+    typeof msg.content === "string" &&
+    msg.content.startsWith(`${RENDER_AIC_MATERIAL_CARD_MARKER}:`)
+  ) {
+    const payload = parseLessonMaterialsMarkerContent(msg.content)
+    return (
+      <div className="flex w-full flex-row items-start justify-start gap-2 md:gap-[8px]">
+        <Avatar className="mt-0.5 size-7 shrink-0 md:size-9">
+          <AvatarImage src={botAvatarSrc} />
+          <AvatarFallback>AI</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 flex-1">
+          {payload ? (
+            <LessonMaterialsCard
+              payload={payload}
+              onPickPrompt={onRecommendedPrompt}
+            />
+          ) : (
+            <div className="rounded-md border border-border bg-bg px-3 py-2 text-[length:var(--font-size-sm)] text-text-secondary">
+              这条资料卡暂时无法显示，请刷新页面重试。
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  /**
+   * 备课就绪卡 marker：`<<<RENDER_TEACHER_LESSON_PREP_READY_CARD>>>:<json>`
+   * 教师在底部 chip 条点「备课」时由 panel 推入；卡片承担"今晚学员 + 课件&设备清单"两块待办。
+   *
+   * 「全部确认妥当」点击 → 通过 onPushAi push 一条中性陈述 AI 气泡，纯待办标记，
+   * 不影响其它任何流程（与"开始上课"无关，本产品里也没有该动作）。
+   */
+  if (
+    !isUser &&
+    typeof msg.content === "string" &&
+    msg.content.startsWith(`${RENDER_TEACHER_LESSON_PREP_READY_CARD_MARKER}:`)
+  ) {
+    const payload = parseTeacherLessonPrepReadyMarkerContent(msg.content)
+    return (
+      <div className="flex w-full flex-row items-start justify-start gap-2 md:gap-[8px]">
+        <Avatar className="mt-0.5 size-7 shrink-0 md:size-9">
+          <AvatarImage src={botAvatarSrc} />
+          <AvatarFallback>AI</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 flex-1">
+          {payload ? (
+            <TeacherLessonPrepReadyCard
+              payload={payload}
+              onPickPrompt={onRecommendedPrompt}
+              onConfirmReady={({ lessonTitle }) => {
+                onPushAi?.(
+                  serializeAiClassroomReply(
+                    buildReply({
+                      headline: `已记录：你已确认《${lessonTitle}》本节准备妥当。`,
+                      body: [
+                        "本提示仅作为你的课前待办标记，不影响其它流程。",
+                      ],
+                    }),
+                  ),
+                )
+              }}
+            />
+          ) : (
+            <div className="rounded-md border border-border bg-bg px-3 py-2 text-[length:var(--font-size-sm)] text-text-secondary">
+              这条备课卡暂时无法显示，请刷新页面重试。
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   /** AI 业务卡 marker：`<<<RENDER_AI_SKILL_CARD>>>:<skillId>` */
   if (
     !isUser &&
@@ -780,6 +1039,12 @@ export interface AiClassroomSideConversationPanelProps {
    * 不传 = 单课模式（不识别任何系列 marker；现有行为完全不变）。
    */
   seriesContext?: AiClassroomSeriesContextForPanel
+  /**
+   * 当前所属教育空间（必填，用于资料卡寻址到 `eduCoursesPersistence` store）。
+   * 默认由顶层调用方注入（currentOrg + scenario）。
+   */
+  spaceOrgId: string
+  spaceScenario?: string
 }
 
 /** 系列上下文：让单课 panel 识别 + 渲染系列 marker，并把提交事件回调到系列容器 */
@@ -932,6 +1197,8 @@ export function AiClassroomSideConversationPanel({
   suppressTeacherControlStrip = false,
   suppressChecklist = false,
   seriesContext,
+  spaceOrgId,
+  spaceScenario,
 }: AiClassroomSideConversationPanelProps) {
   const [draft, setDraft] = React.useState("")
   const [messages, setMessages] = React.useState<Message[]>(() =>
@@ -983,15 +1250,28 @@ export function AiClassroomSideConversationPanel({
 
   /**
    * 当前阶段中对应的 section：
-   * - 主线课程：跟随 educationStage（pre / in / post）
-   * - 非主线 past 课程：固定显示「课后」section
-   * - 非主线 upcoming 课程：固定显示「课前」section
+   * - 主线课程：始终跟随 educationStage（pre / in / post）
+   * - 非主线课程默认按 outline staticStatus 锁定（past→post / upcoming→pre），
+   *   避免用户首次进入"未开课系列"就看到课后欢迎语等不合常理的初始体验
+   * - **但**一旦 stage 在 panel mount 之后发生变化（来源：顶部演示开关、或父级 hint 同步），
+   *   立即把 stageOverridden 置 true，effectiveStage 直接 = stage，
+   *   让"在子 CUI 内切课前/课中/课后"和"从履约卡进入时父级 hint 切 stage"
+   *   都能即时反映到欢迎语 / 价值卡 / 当前 section 上。
    *
-   * 由 `aiClassroomWelcome.getEffectiveStage` 统一计算，保证欢迎卡 chip / 兜底 chip / 当前 section 三处共用一致的"等效阶段"。
+   * 注意：lessonId 切换会让本组件 remount（key 含 outline.index），
+   * 因此 initialStageRef 自然按"打开当前 outline 时父级最新 stage"重置，
+   * 不会被上一节遗留的 stageOverridden 干扰。
    */
+  const initialStageRef = React.useRef(stage)
+  const [stageOverridden, setStageOverridden] = React.useState(false)
+  React.useEffect(() => {
+    if (!stageOverridden && stage !== initialStageRef.current) {
+      setStageOverridden(true)
+    }
+  }, [stage, stageOverridden])
   const effectiveStage: EducationStage = React.useMemo(
-    () => getEffectiveStage(lessonId, stage),
-    [lessonId, stage],
+    () => (stageOverridden ? stage : getEffectiveStage(lessonId, stage)),
+    [stageOverridden, lessonId, stage],
   )
 
 
@@ -1102,17 +1382,107 @@ export function AiClassroomSideConversationPanel({
     entryScrollModeRef.current = null
   }, [role, lessonId, messages])
 
-  /** 自动滚动到底部 */
+  /**
+   * 自动滚动到底部 + 贴底窗口
+   *
+   * 问题
+   * ----------------------------------------------------
+   * 资料卡 / 备课卡 / 履约卡等业务卡是订阅 store 异步渲染的：
+   *  - messages.length 增加 → 此 effect 立刻 smooth 滚到 `scrollHeight`
+   *  - 但此刻卡片内的 useSyncExternalStore / list / image 还没撑开高度
+   *  - 卡片真正展开后 scrollHeight 又长出来一截，用户被留在新卡的上方
+   *
+   * 修复
+   * ----------------------------------------------------
+   * - 消息追加后开启 1.8s 的「贴底窗口」`scrollPinUntilRef`
+   * - 在窗口内，配套的 ResizeObserver 一旦观测到内容高度变化就再次贴底（auto 行为，不打扰）
+   * - 用户手动向上滚（距底 > 80px）立即关闭窗口，避免打断阅读
+   */
+  const scrollPinUntilRef = React.useRef(0)
+  /**
+   * 锚点定位（覆盖默认贴底）：
+   *
+   * 适用于"点击操作 chip → push 用户气泡 + AI 卡片"这类场景。
+   * 卡片本身高度往往超过视口（请假 / 调课 / 签到），如果按 messages.length 走
+   * 默认 smooth 滚到 scrollHeight，用户视线会落在卡片底部按钮，看不到卡片标题
+   * 与上方控件。
+   *
+   * 因此发起方在 push 前写入 `pendingScrollAnchorIdRef`，同时把
+   * `skipNextAutoScrollRef` 置 true 抑制一次默认贴底；本 effect 在 messages
+   * 增长后定位到锚点（顶部对齐 + 8px 留白），并开启 1.8s 锚点 pin 窗口给
+   * ResizeObserver 续贴。
+   */
+  const pendingScrollAnchorIdRef = React.useRef<string | null>(null)
+  const anchorPinIdRef = React.useRef<string | null>(null)
+  const anchorPinUntilRef = React.useRef(0)
   React.useEffect(() => {
-    if (skipNextAutoScrollRef.current) {
-      skipNextAutoScrollRef.current = false
-      return
-    }
     if (entryScrollArmedRef.current) return
     const el = scrollRef.current
     if (!el) return
+    if (skipNextAutoScrollRef.current) {
+      skipNextAutoScrollRef.current = false
+      const anchorId = pendingScrollAnchorIdRef.current
+      if (anchorId) {
+        pendingScrollAnchorIdRef.current = null
+        anchorPinIdRef.current = anchorId
+        anchorPinUntilRef.current = Date.now() + 1800
+        /** 等 React commit 完，再用 offsetTop 定位锚点到视窗顶部（留 8px） */
+        requestAnimationFrame(() => {
+          const node = el.querySelector(`[data-message-id="${anchorId}"]`) as HTMLElement | null
+          if (!node) return
+          el.scrollTo({ top: Math.max(0, node.offsetTop - 8), behavior: "smooth" })
+        })
+      }
+      return
+    }
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
+    /** 给后续异步渲染留出 1.8s 贴底窗口 */
+    scrollPinUntilRef.current = Date.now() + 1800
   }, [messages.length])
+
+  /**
+   * 内容高度变化时的"续贴"：
+   * - 优先满足锚点 pin（操作卡正在撑开高度，仍保持锚点顶部对齐）
+   * - 否则在贴底窗口期内贴底，覆盖资料卡 / 备课卡等异步撑开
+   */
+  React.useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const inner = el.firstElementChild
+    if (!(inner instanceof HTMLElement)) return
+    if (typeof ResizeObserver === "undefined") return
+    const ro = new ResizeObserver(() => {
+      const now = Date.now()
+      if (now <= anchorPinUntilRef.current && anchorPinIdRef.current) {
+        const node = el.querySelector(
+          `[data-message-id="${anchorPinIdRef.current}"]`,
+        ) as HTMLElement | null
+        if (node) {
+          el.scrollTo({ top: Math.max(0, node.offsetTop - 8), behavior: "auto" })
+          return
+        }
+      }
+      if (now > scrollPinUntilRef.current) return
+      el.scrollTo({ top: el.scrollHeight, behavior: "auto" })
+    })
+    ro.observe(inner)
+    return () => ro.disconnect()
+  }, [])
+
+  /** 用户主动向上滚（距底 > 80px）立即终止贴底 + 锚点窗口，尊重阅读意图 */
+  React.useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const onScroll = () => {
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+      if (dist > 80) {
+        scrollPinUntilRef.current = 0
+        anchorPinUntilRef.current = 0
+      }
+    }
+    el.addEventListener("scroll", onScroll, { passive: true })
+    return () => el.removeEventListener("scroll", onScroll)
+  }, [])
 
   /**
    * 「清单打勾」统一通道：
@@ -1185,9 +1555,106 @@ export function AiClassroomSideConversationPanel({
    */
   const executeSkill = React.useCallback(
     (input: { skillId?: string; command: string }) => {
-      const item = resolveSkillBy(input)
       const now = Date.now()
       const ts = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+
+      /**
+       * 三大操作卡（签到 / 调课 / 请假）的命令优先识别（早返回）：
+       *
+       * 与 `handleRecommendedPrompt` 同一份正则规则；之所以在 `executeSkill` 也做一次，
+       * 是因为外部入口（pendingRequest = 教学管理列表卡 / 履约卡 / dock chip 等）
+       * 走的是 executeSkill，而不是 handleRecommendedPrompt：
+       *   - 老路径：executeSkill 只识别 风采 / 资料；签到 / 请假 / 调课 命令会掉进
+       *     skill registry 的"占位文本回复"，从「教学管理 → 考勤 → 单条 请假/调课」
+       *     点进来，结果是一段干瘪文字而不是请假 / 调课卡。
+       *   - 现路径：在最前面把这三类命令直接 push 对应业务卡 marker
+       *     （RENDER_LESSON_*_CARD_MARKER），跟从 chip / 输入框走的体验完全一致。
+       *
+       * 正则与 `handleRecommendedPrompt` 严格对齐，包括"调课命中但出现请假关键词时
+       * 让位给请假"这条消歧规则，避免"代孩子调课请假"之类含糊文本误命中。
+       *
+       * 早返回的另一层意义：跳过下方的 `triggerSkillIm` / `pushClassTask` 等"按 skillId
+       * 触发"的副作用——这些操作卡是单独的业务流，不应再附加被某个 skill 顺手触发的
+       * IM 弹窗或随堂题推送（与 `handleRecommendedPrompt` 的 push-then-return 行为对齐）。
+       */
+      const cmd = input.command
+      const isAttendancePrompt =
+        /签到|看本周签到明细|看我的签到记录|看孩子的签到记录/.test(cmd)
+      const isReschedulePrompt =
+        /调课|发起调课并通知学生家长|发起调课申请|代孩子发起调课申请|申请调课/.test(cmd) &&
+        !/请假/.test(cmd)
+      const isLeavePrompt = /请假|我要请假|代孩子请假|查看本节请假情况/.test(cmd)
+      /**
+       * 作业卡命令拦截（push 作业管理卡 marker）：
+       *
+       * 来源：履约卡 / 教学管理列表卡 / dock chip 的 "作业" 触发，
+       * 老师=布置今晚作业 / 我的作业=学生入口 / 看孩子今晚作业=家长入口 /
+       * 批改作业=老师批改 Tab。这里在 executeSkill 与 handleRecommendedPrompt
+       * 同步拦截，保证两条触发链最终都进入 LessonHomeworkCard。
+       */
+      const isHomeworkPrompt =
+        /布置今晚作业|布置作业$|布置.*课后作业|今晚作业.*布置|派发今晚作业|批改作业|我的作业|今晚作业|作业 ?清单|看孩子今晚作业|孩子今晚作业|孩子.*今晚.*作业|今晚孩子作业/.test(
+          cmd,
+        )
+      if (isHomeworkPrompt) {
+        const userMsgId = `aic-side-hw-u-${now}`
+        pendingScrollAnchorIdRef.current = userMsgId
+        skipNextAutoScrollRef.current = true
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: userMsgId,
+            senderId: currentUser.id,
+            content: cmd,
+            timestamp: ts,
+            createdAt: now,
+          },
+          {
+            id: `aic-side-hw-a-${now + 1}`,
+            senderId: "ai-assistant",
+            content: buildLessonHomeworkMarkerContent({ role, lessonId }),
+            timestamp: ts,
+            createdAt: now + 1,
+          },
+        ])
+        tryMarkChecklistDone({ prompt: cmd })
+        return
+      }
+      if (isAttendancePrompt || isReschedulePrompt || isLeavePrompt) {
+        const marker = isAttendancePrompt
+          ? RENDER_LESSON_ATTENDANCE_CARD_MARKER
+          : isReschedulePrompt
+            ? RENDER_LESSON_RESCHEDULE_CARD_MARKER
+            : RENDER_LESSON_LEAVE_CARD_MARKER
+        const userMsgId = `aic-side-op-u-${now}`
+        /**
+         * 操作卡定位：与 handleRecommendedPrompt 同款 anchor 抑制，
+         * 让"用户气泡 + 新卡"贴顶部，第一眼能看到卡片标题。
+         */
+        pendingScrollAnchorIdRef.current = userMsgId
+        skipNextAutoScrollRef.current = true
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: userMsgId,
+            senderId: currentUser.id,
+            content: cmd,
+            timestamp: ts,
+            createdAt: now,
+          },
+          {
+            id: `aic-side-op-a-${now + 1}`,
+            senderId: "ai-assistant",
+            content: buildLessonOperationCardContent(marker, role, lessonId),
+            timestamp: ts,
+            createdAt: now + 1,
+          },
+        ])
+        tryMarkChecklistDone({ prompt: cmd })
+        return
+      }
+
+      const item = resolveSkillBy(input)
       const userMsg: Message = {
         id: `aic-side-u-${now}`,
         senderId: currentUser.id,
@@ -1196,6 +1663,43 @@ export function AiClassroomSideConversationPanel({
         createdAt: now,
       }
       const botContent = (() => {
+        if (
+          input.command === "风采点评" ||
+          input.command === "风采报告" ||
+          input.command === "查看已发送的报告风采" ||
+          input.command === "发送学员个性化报告风采"
+        ) {
+          return buildLessonOperationCardContent(RENDER_LESSON_REVIEW_CARD_MARKER, role, lessonId)
+        }
+        /**
+         * 教师 · 「资料」按钮命中：直接 push 资料卡 marker，不走 legacy 文本回复。
+         * 这里是「资料」入口的唯一拦截点；学生 / 家长仍按原路径回 legacy 文本。
+         */
+        /**
+         * 「资料」按钮命中：直接 push 资料卡 marker。
+         *
+         * 老师 / 学生 / 家长 / 管理员都进入同款资料卡（同一份微盘数据源），
+         * 卡内根据 `viewerRole` 做：① 可见性过滤；② 上传 / 删除等动作的权限收敛。
+         */
+        if (input.command === "看本节课资料") {
+          const payload: LessonMaterialsMarkerPayload = {
+            lessonKey: lessonId,
+            lessonTitle: seriesContext?.outline.title ?? lessonTitle,
+            seriesName: seriesContext?.series.name,
+            lessonNumber: seriesContext?.outline.index,
+            totalLessons: seriesContext?.series.totalLessons,
+            isPast: seriesContext?.outline.staticStatus === "past",
+            spaceOrgId,
+            spaceScenario,
+            viewerRole: role === "teacher"
+              ? "teacher"
+              : role === "student"
+                ? "student"
+                : "parent",
+            viewerId: currentUser.id,
+          }
+          return buildLessonMaterialsMarkerContent(payload)
+        }
         if (item) return buildAiClassroomSkillPlaceholderReply(item, role, effectiveStage, deliveryMode)
         const legacy = resolveRecommendedPromptReply(input.command, { role, deliveryMode })
         if (legacy) return serializeAiClassroomReply(inferAiClassroomReplyFromText(legacy))
@@ -1264,7 +1768,7 @@ export function AiClassroomSideConversationPanel({
       /** 清单同步：任意入口触发的 skillId / prompt 命中清单某项 → 自动打勾 */
       tryMarkChecklistDone({ skillId: item?.id ?? input.skillId, prompt: input.command })
     },
-    [resolveSkillBy, role, effectiveStage, deliveryMode, lessonId, lessonTitle, tryMarkChecklistDone],
+    [resolveSkillBy, role, effectiveStage, deliveryMode, lessonId, lessonTitle, tryMarkChecklistDone, seriesContext],
   )
 
   /**
@@ -1330,7 +1834,7 @@ export function AiClassroomSideConversationPanel({
   )
 
   /**
-   * AI 主动开场：按当前身份/阶段/课程强制刷新欢迎语 + 按需补阶段卡片。
+   * AI 主动开场：按当前身份/阶段/课程强制刷新欢迎语（含推荐指令 chip），不追加价值卡。
    *
    * 历史问题：旧逻辑仅在 `prev.length===0` 时插欢迎语，导致已有历史会话时，
    * 切换课前/课中/课后仍看到旧欢迎语（与当前阶段不匹配）。
@@ -1338,44 +1842,32 @@ export function AiClassroomSideConversationPanel({
    * 新逻辑：
    * - 先清理所有旧开场（id 前缀 `aic-side-opening-`）；
    * - 再插入 1 条当前 opening；
-   * - checklist/liveMoment 仍遵循"缺哪张补哪张"策略，避免重复。
+   * - 价值卡（编号条叙事）不再注入子 CUI，仅保留欢迎语 + 推荐指令 chip。
    */
   const ensureOpeningOnce = React.useCallback(() => {
     setMessages((prev) => {
       /**
-       * 入场清理：早期的「清单卡 + 完成庆祝卡 + 打勾微泡 + 课中现场卡」整套机制下线，
-       * 由 (role × stage × deliveryMode) 维度的「价值卡」统一承担"AI 已为你做了什么"叙事。
-       * 这里把历史会话里残留的所有这些 marker 一并过滤掉，保证用户视觉里**只看到**新版价值卡。
+       * 入场清理：早期「清单卡 / 庆祝卡 / 打勾微泡 / 课中现场卡」及价值卡 marker 均从子 CUI
+       * 主线程过滤掉；切换课前/课中/课后时只刷新结构化欢迎语与 nextActions。
        *
-       * 仍然保留 MessageBubble 里对这些 marker 的解析分支，方便外部调用方（IM / 系列卡）
-       * 在极少数场景里继续 push 微泡之类的小气泡时不会渲染失败；只是从子 CUI 主入场流程里彻底移除。
+       * MessageBubble 仍保留对上述 marker 的解析，便于 IM / 系列卡等外部入口单独 push 时不崩。
        */
       const filtered = prev.filter((m) => {
         if (typeof m.content !== "string") return true
         if (m.content.startsWith(`${AIC_CHECKLIST_CARD_MARKER}:`)) return false
         if (m.content.startsWith(`${AIC_CHECKLIST_DONE_MARKER}:`)) return false
         if (m.content.startsWith(`${AIC_LIVE_MOMENT_CARD_MARKER}:`)) return false
+        /**
+         * 子 CUI 任意阶段仅保留「欢迎语 + 推荐指令」：价值卡（课前/课中/课后编号条）
+         * 不再展示；历史会话里残留的价值卡 marker 一并过滤，避免切换课中/课后时再次出现。
+         */
+        const vKey = parseValueCardMarker(m.content)
+        if (vKey) return false
         return true
       })
 
       const openingPrefix = "aic-side-opening-"
       const withoutOldOpenings = filtered.filter((m) => !m.id.startsWith(openingPrefix))
-      /**
-       * 价值卡：当前 (role × stage × mode) 缺哪张补哪张。
-       * - 9 个组合都已配置，保证任意"角色 + 阶段 + 形态"都有一张恰当的价值卡。
-       * - 系列 panel 非主线节也会补——价值卡按 role × stage × mode 维度，与具体 lessonId 无关，
-       *   即使在历史节看到也仍然成立（且与 outline 的 staticStatus 自动通过 effectiveStage 对齐）。
-       */
-      const hasValueCardForCurrent = filtered.some((m) => {
-        if (typeof m.content !== "string") return false
-        const k = parseValueCardMarker(m.content)
-        if (!k) return false
-        return (
-          k.role === role &&
-          k.stage === effectiveStage &&
-          (k.deliveryMode ?? "online") === deliveryMode
-        )
-      })
       const additions: Message[] = []
       const now = Date.now()
       const ts = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -1388,22 +1880,6 @@ export function AiClassroomSideConversationPanel({
         timestamp: ts,
         createdAt: now,
       })
-      if (
-        !hasValueCardForCurrent &&
-        hasAiClassroomValueCard(role, effectiveStage, deliveryMode)
-      ) {
-        additions.push({
-          id: `aic-side-valuecard-${role}-${effectiveStage}-${deliveryMode}-${now + 2}`,
-          senderId: "ai-assistant",
-          content: buildValueCardContent({
-            role,
-            stage: effectiveStage,
-            deliveryMode,
-          }),
-          timestamp: ts,
-          createdAt: now + 2,
-        })
-      }
       if (additions.length === 0 && withoutOldOpenings === prev && filtered === prev) return prev
       return [...withoutOldOpenings, ...additions]
     })
@@ -1440,6 +1916,25 @@ export function AiClassroomSideConversationPanel({
     /* messages.length 仅作为"首次空态"判断，避免依赖循环 */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role, lessonId])
+
+  /**
+   * effectiveStage 切换时刷新欢迎语：
+   *
+   * 老师 / 学生 / 家长在子 CUI 内（或顶部演示开关）切换"课前 / 课中 / 课后"后，
+   * 如果开场气泡还是上一阶段的措辞，会与当下顶栏 / 控制条状态相互打架。
+   * 这里在 stage 真正变化后，复用 `ensureOpeningOnce`：
+   *   - 把已存在的旧 `aic-side-opening-` 气泡过滤掉（避免堆积）
+   *   - 按当前 (role, stage, deliveryMode) 重新 push 一条新开场 + 缺失的价值卡
+   *
+   * 用 ref 跟踪上一次的 effectiveStage，确保仅在真正变化时执行；
+   * 切换 role / lessonId 已由上一个 mount effect 覆盖，此处不再重复。
+   */
+  const lastEffectiveStageRef = React.useRef<EducationStage>(effectiveStage)
+  React.useEffect(() => {
+    if (lastEffectiveStageRef.current === effectiveStage) return
+    lastEffectiveStageRef.current = effectiveStage
+    ensureOpeningOnce()
+  }, [effectiveStage, ensureOpeningOnce])
 
   /**
    * 学生侧：订阅课堂任务总线，当老师推了一道未交的随堂题时，自动在子 CUI 主线上 push 一张
@@ -1514,6 +2009,190 @@ export function AiClassroomSideConversationPanel({
       }
 
       /**
+       * 课程子 CUI · 三大操作卡（签到 / 调课 / 请假）：
+       * - 签到：点击即进入操作卡，不再只回复「看记录」文本
+       * - 调课：老师=直接调课成功并通知；学生/家长=提交申请待老师同意
+       * - 请假：独立于调课；学生/家长提交即生效并通知老师，老师侧仅查看记录
+       */
+      const isAttendancePrompt = /签到|看本周签到明细|看我的签到记录|看孩子的签到记录/.test(prompt)
+      const isReschedulePrompt =
+        /调课|发起调课并通知学生家长|发起调课申请|代孩子发起调课申请|申请调课/.test(prompt) &&
+        !/请假/.test(prompt)
+      const isLeavePrompt = /请假|我要请假|代孩子请假|查看本节请假情况/.test(prompt)
+      const isReviewPrompt = /风采点评|风采报告|查看已发送的报告风采|发送学员个性化报告风采/.test(prompt)
+      /** 作业卡命令拦截（与 executeSkill 同款规则） */
+      const isHomeworkPrompt =
+        /布置今晚作业|布置作业$|布置.*课后作业|今晚作业.*布置|派发今晚作业|批改作业|我的作业|今晚作业|作业 ?清单|看孩子今晚作业|孩子今晚作业|孩子.*今晚.*作业|今晚孩子作业/.test(
+          prompt,
+        )
+      if (isHomeworkPrompt) {
+        const now = Date.now()
+        const ts = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        const userMsgId = `aic-side-hw-u-${now}`
+        pendingScrollAnchorIdRef.current = userMsgId
+        skipNextAutoScrollRef.current = true
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: userMsgId,
+            senderId: currentUser.id,
+            content: prompt,
+            timestamp: ts,
+            createdAt: now,
+          },
+          {
+            id: `aic-side-hw-a-${now + 1}`,
+            senderId: "ai-assistant",
+            content: buildLessonHomeworkMarkerContent({ role, lessonId }),
+            timestamp: ts,
+            createdAt: now + 1,
+          },
+        ])
+        return
+      }
+      if (isAttendancePrompt || isReschedulePrompt || isLeavePrompt || isReviewPrompt) {
+        const now = Date.now()
+        const ts = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        const marker = isAttendancePrompt
+          ? RENDER_LESSON_ATTENDANCE_CARD_MARKER
+          : isReschedulePrompt
+            ? RENDER_LESSON_RESCHEDULE_CARD_MARKER
+            : isLeavePrompt
+              ? RENDER_LESSON_LEAVE_CARD_MARKER
+              : RENDER_LESSON_REVIEW_CARD_MARKER
+        const userMsgId = `aic-side-op-u-${now}`
+        /**
+         * 操作卡定位：抑制默认贴底，改为把"用户气泡 + 新卡"贴到视窗顶部，
+         * 让用户进入操作流时第一眼就看到卡片标题与上方控件，而不是卡片底部。
+         */
+        pendingScrollAnchorIdRef.current = userMsgId
+        skipNextAutoScrollRef.current = true
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: userMsgId,
+            senderId: currentUser.id,
+            content: prompt,
+            timestamp: ts,
+            createdAt: now,
+          },
+          {
+            id: `aic-side-op-a-${now + 1}`,
+            senderId: "ai-assistant",
+            content: buildLessonOperationCardContent(marker, role, lessonId),
+            timestamp: ts,
+            createdAt: now + 1,
+          },
+        ])
+        return
+      }
+
+      /**
+       * 「资料」按钮拦截：直接 push 资料卡 marker，不走 skill 匹配 / legacy text。
+       *
+       * 该入口（输入框上方应用条「资料」chip）走的是本函数而非 executeSkill，
+       * 所以在这里再次拦截一份；老师 / 学生 / 家长都进入同款资料卡，由卡内根据
+       * `viewerRole` 做可见性过滤与上传 / 删除权限收敛。
+       */
+      if (prompt === "看本节课资料") {
+        const now = Date.now()
+        const ts = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        const payload: LessonMaterialsMarkerPayload = {
+          lessonKey: lessonId,
+          lessonTitle: seriesContext?.outline.title ?? lessonTitle,
+          seriesName: seriesContext?.series.name,
+          lessonNumber: seriesContext?.outline.index,
+          totalLessons: seriesContext?.series.totalLessons,
+          isPast: seriesContext?.outline.staticStatus === "past",
+          spaceOrgId,
+          spaceScenario,
+          viewerRole: role === "teacher"
+            ? "teacher"
+            : role === "student"
+              ? "student"
+              : "parent",
+          viewerId: currentUser.id,
+        }
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `aic-side-rp-u-${now}`,
+            senderId: currentUser.id,
+            content: prompt,
+            timestamp: ts,
+            createdAt: now,
+          },
+          {
+            id: `aic-side-rp-a-${now + 1}`,
+            senderId: "ai-assistant",
+            content: buildLessonMaterialsMarkerContent(payload),
+            timestamp: ts,
+            createdAt: now + 1,
+          },
+        ])
+        return
+      }
+
+      /**
+       * 教师 ·「备课」按钮拦截：push 备课就绪卡 marker。
+       *
+       * runtimeHint + minutesToStart 由当前 stage / runtime 计算；
+       * 课中 / 课后老师如果再点「备课」，卡头部会自动切换到对应文案（不报错）。
+       */
+      if (prompt === "开始备课" && role === "teacher") {
+        const now = Date.now()
+        const ts = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        const runtimeHint: TeacherLessonPrepRuntimeHint =
+          stage === "in"
+            ? runtime.status === "live"
+              ? "live"
+              : "imminent"
+            : stage === "post"
+              ? "post"
+              : runtime.status === "imminent"
+                ? "imminent"
+                : "pre"
+        const minutesToStart =
+          runtimeHint === "pre" || runtimeHint === "imminent"
+            ? runtime.minutesToStart
+            : undefined
+        /** 直接 lookup，避免依赖更下方声明的 `lessonSummary` 形成顺序耦合 */
+        const summary = findLessonSummary(lessonId)
+        const payload: TeacherLessonPrepReadyMarkerPayload = {
+          lessonKey: lessonId,
+          lessonTitle: seriesContext?.outline.title ?? lessonTitle,
+          seriesName: seriesContext?.series.name,
+          lessonNumber: seriesContext?.outline.index,
+          totalLessons: seriesContext?.series.totalLessons,
+          weekdayLabel: summary?.weekdayLabel ?? DEMO_LESSON.weekday,
+          startTime: summary?.startTime ?? DEMO_LESSON.startTime,
+          endTime: summary?.endTime ?? DEMO_LESSON.endTime,
+          runtimeHint,
+          minutesToStart,
+          spaceOrgId,
+          spaceScenario,
+        }
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `aic-side-rp-u-${now}`,
+            senderId: currentUser.id,
+            content: prompt,
+            timestamp: ts,
+            createdAt: now,
+          },
+          {
+            id: `aic-side-rp-a-${now + 1}`,
+            senderId: "ai-assistant",
+            content: buildTeacherLessonPrepReadyMarkerContent(payload),
+            timestamp: ts,
+            createdAt: now + 1,
+          },
+        ])
+        return
+      }
+
+      /**
        * 强契约优先：如果 chip 文案能命中某个 Skill（如「出一道随堂题」→ `tc-question`），
        * 一律走 `executeSkill` 完整链路 —— 渲染业务卡 + 触发 IM / 课堂任务联动。
        * 这样无论用户从「欢迎气泡」、「现场卡」、「底部 dock chip」还是「技能树」点入，
@@ -1557,6 +2236,14 @@ export function AiClassroomSideConversationPanel({
       deliveryMode,
       tryMarkChecklistDone,
       onOpenLiveClass,
+      lessonId,
+      lessonTitle,
+      seriesContext,
+      /** 备课卡 marker 构建依赖（与「资料」拦截的 spaceOrgId / spaceScenario 同源） */
+      stage,
+      runtime,
+      spaceOrgId,
+      spaceScenario,
     ],
   )
 
@@ -1699,28 +2386,35 @@ export function AiClassroomSideConversationPanel({
       >
         <div className="flex flex-col gap-5">
           {messages.map((msg) => (
-            <MessageBubble
-              key={msg.id}
-              msg={msg}
-              botAvatarSrc={botAvatarSrc}
-              userAvatarSrc={userAvatarSrc}
-              userDisplayName={userDisplayName}
-              onRecommendedPrompt={handleRecommendedPrompt}
-              onPickChecklistItem={(item) => handleRecommendedPrompt(item.primaryPrompt)}
-              doneIds={doneIds}
-              deliveryMode={deliveryMode}
-              classTasks={classTasks}
-              onAnsweredQuiz={handleQuizAnswered}
-              seriesContext={seriesContext}
-              onPushAi={pushAiBubble}
-            />
+            <div key={msg.id} data-message-id={msg.id}>
+              <MessageBubble
+                msg={msg}
+                role={role}
+                stage={stage}
+                botAvatarSrc={botAvatarSrc}
+                userAvatarSrc={userAvatarSrc}
+                userDisplayName={userDisplayName}
+                onRecommendedPrompt={handleRecommendedPrompt}
+                onPickChecklistItem={(item) => handleRecommendedPrompt(item.primaryPrompt)}
+                doneIds={doneIds}
+                deliveryMode={deliveryMode}
+                classTasks={classTasks}
+                onAnsweredQuiz={handleQuizAnswered}
+                seriesContext={seriesContext}
+                onPushAi={pushAiBubble}
+                lessonId={lessonId}
+                lessonTitle={lessonTitle}
+              />
+            </div>
           ))}
         </div>
       </div>
 
       {/*
         统一操作条
-        - 「在线教室」按钮（左起首位，仅 teacher/student × in-class × 主线节）：进入 AI 互动课堂浮层
+        - 「在线课堂」按钮（左起首位，仅 teacher/student × 课中 stage）：进入 AI 互动课堂浮层
+          · 不再要求 isMainLesson —— 用户新建课程 / 已结课 / 未开课系列在「课中」演示阶段
+            同样能从应用条进入直播浮层，与产品一贯交互一致
         - 8 个固定能力按钮（评价 / 签到 / 作业 / 调课 / 风采 / 沟通 / 成员 / 资料）：
           点击 = 派发一条 role-aware prompt 到 `handleRecommendedPrompt`
         - 全部按钮统一 pill 样式：白底圆角 + 边框 + 单行水平滚动，图标在前 文本在后
@@ -1730,9 +2424,8 @@ export function AiClassroomSideConversationPanel({
           className="flex w-full min-w-0 items-center gap-[var(--space-200)] overflow-x-auto"
           style={{ scrollbarWidth: "thin" }}
         >
-          {/* 在线教室 · 仅老师 / 学生 在主线节课中阶段（与 LiveClassEntryStrip 准入条件一致） */}
+          {/* 在线课堂 · 老师 / 学生 在课中阶段常驻 */}
           {onOpenLiveClass &&
-          isMainLesson &&
           (role === "teacher" || role === "student") &&
           stage === "in" ? (
             <button
@@ -1743,7 +2436,7 @@ export function AiClassroomSideConversationPanel({
                 "rounded-full border border-border transition-all duration-200 ease-out",
                 "hover:bg-[var(--black-alpha-11)]",
               )}
-              aria-label="在线教室"
+              aria-label="在线课堂"
             >
               <MonitorPlay
                 aria-hidden
@@ -1751,7 +2444,7 @@ export function AiClassroomSideConversationPanel({
                 strokeWidth={1.75}
               />
               <span className="text-[length:var(--font-size-xs)] leading-none text-[var(--color-text)] whitespace-nowrap font-[var(--font-weight-medium)]">
-                在线教室
+                在线课堂
               </span>
             </button>
           ) : null}

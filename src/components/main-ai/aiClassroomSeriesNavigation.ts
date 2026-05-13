@@ -42,8 +42,19 @@ export function getOutlineThreadKey(
    */
   if (outline.boundLessonId === DEMO_LESSON.id) return DEMO_LESSON.id
   /**
-   * 其它 outline（含绑了非主线占位 lessonId 的节、或完全未绑的节）→
-   * 走系列内独立 key，避免与"未来真的接入"的单课 panel 互相污染。
+   * 已绑定到具体 lessonKey 的 outline（非主线但有 boundLessonId）→
+   * 直接复用 boundLessonId 作 thread key。
+   *
+   * 这样能让 `<AiClassroomSideConversationPanel lessonId={threadKey}>` 在传给资料卡的
+   * marker payload 里的 `lessonKey` 恰好等于 `eduCoursesPersistence.CourseLessonFolder.lessonKey`，
+   * 从而 `findCourseAndLessonByLessonKey` 找得到，微盘上传的文件能实时同步到资料卡。
+   *
+   * （之前这里一律落 `${series.id}__outline_${index}`，与 store 里实际的 lessonKey 错位，
+   *   导致非主线节 / 新建课程合成系列的资料卡都拉不到文件。）
+   */
+  if (outline.boundLessonId) return outline.boundLessonId
+  /**
+   * 完全未绑的 outline → 走系列内独立 key，避免与"未来真的接入"的单课 panel 互相污染。
    */
   return `${series.id}__outline_${outline.index}`
 }

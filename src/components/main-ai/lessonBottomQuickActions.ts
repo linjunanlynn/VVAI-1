@@ -12,13 +12,14 @@
  */
 
 import {
-  Award,
   CalendarCheck,
+  ClipboardCheck,
   ClipboardList,
   FolderClosed,
   MessageSquare,
   RefreshCcw,
   Sparkles,
+  UserMinus,
   Users,
   type LucideIcon,
 } from "lucide-react"
@@ -33,20 +34,33 @@ export interface LessonBottomQuickAction {
 }
 
 /**
- * 8 个固定按钮，按身份返回不同的 prompt 文本。
- * 顺序固定 = 评价 → 签到 → 作业 → 调课 → 风采 → 沟通 → 成员 → 资料
+ * 课程子 CUI 输入框上方按钮：
+ * - 通用 7 项：风采点评 → 签到 → 作业 → 调课 → 沟通 → 成员 → 资料
+ *   · 「风采点评」由原「风采 / 点评」合并而来：本节评价（学情亮点 / 待改进）与课堂风采（精彩瞬间 / 群发家长）属于同一个"事后向家长展示本节情况"的产物，合并入口减少应用条拥挤。
+ * - 老师专属：在「资料」之后追加「备课」（触发 marker 渲染备课就绪卡）
+ *
+ * 老师入口的 prompt 文本固定为 `开始备课`，
+ * 由 panel 内 `handleRecommendedPrompt` 直接拦截 → push 备课卡 marker，不走 Skill 匹配。
  */
 export function getLessonBottomQuickActions(
   role: EduLessonAttendingRole,
 ): LessonBottomQuickAction[] {
   const isTeacher = role === "teacher"
   const isStudent = role === "student"
-  return [
+  const baseActions: LessonBottomQuickAction[] = [
     {
-      id: "qa-eval",
-      label: "评价",
-      icon: Award,
-      prompt: isTeacher ? "给学生写本节评价" : "看老师本节评价",
+      id: "qa-review-moments",
+      label: "风采点评",
+      icon: Sparkles,
+      /**
+       * 合并语义：
+       *  - 老师：写本节评价 + 选课堂风采 → 一键群发学情报告（既有 Skill 入口）
+       *  - 学生 / 家长：看本节老师评价与课堂风采精选
+       *
+       * prompt 文本沿用既有 keyword「一键群发学情报告 / 看课堂风采」走 resolveRecommendedPromptReply，
+       * 老师场景下复用学情报告 Skill；学生 / 家长走原"看课堂风采"通道，不需要新增 Skill 配置。
+       */
+      prompt: isTeacher ? "风采点评" : "风采报告",
     },
     {
       id: "qa-attendance",
@@ -72,13 +86,17 @@ export function getLessonBottomQuickActions(
       id: "qa-reschedule",
       label: "调课",
       icon: RefreshCcw,
-      prompt: isTeacher ? "处理请假调课审批" : isStudent ? "申请调课" : "代孩子请假调课",
+      prompt: isTeacher
+        ? "发起调课并通知学生家长"
+        : isStudent
+          ? "发起调课申请"
+          : "代孩子发起调课申请",
     },
     {
-      id: "qa-moments",
-      label: "风采",
-      icon: Sparkles,
-      prompt: isTeacher ? "发送课堂风采给家长" : "看课堂风采",
+      id: "qa-leave",
+      label: "请假",
+      icon: UserMinus,
+      prompt: isTeacher ? "查看本节请假情况" : isStudent ? "我要请假" : "代孩子请假",
     },
     {
       id: "qa-communicate",
@@ -96,7 +114,21 @@ export function getLessonBottomQuickActions(
       id: "qa-materials",
       label: "资料",
       icon: FolderClosed,
-      prompt: isTeacher ? "看本节课资料" : "看本节课件",
+      /**
+       * 老师 / 学生 / 家长统一走「看本节课资料」prompt，
+       * 由 panel 的 `handleRecommendedPrompt` 拦截后 push 资料卡 marker
+       * （viewerRole 注入卡内做权限收敛）。
+       */
+      prompt: "看本节课资料",
     },
   ]
+  if (isTeacher) {
+    baseActions.push({
+      id: "qa-prep",
+      label: "备课",
+      icon: ClipboardCheck,
+      prompt: "开始备课",
+    })
+  }
+  return baseActions
 }

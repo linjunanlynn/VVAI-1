@@ -179,6 +179,24 @@ const TEACHER_INTENTS: Record<string, EduMainChipMeta> = {
     pickIntentPrompt: "私聊一个学员",
     pickIntentLabel: "想在哪节课私聊学员？",
   },
+  /** 课中 · 线上：与侧 CUI「在线教室」入口同语义（选课后打开互动课堂） */
+  "打开在线教室": {
+    kind: "course-pick",
+    pickIntentPrompt: "进入AI互动课堂",
+    pickIntentLabel: "想在哪节课打开在线教室？",
+  },
+  /** 与侧 CUI 应用条「签到」老师文案一致，选课后进子 CUI 出签到卡 */
+  "签到点名": {
+    kind: "course-pick",
+    pickIntentPrompt: "看本周签到明细",
+    pickIntentLabel: "想给哪节课做签到点名？",
+  },
+  /** 与侧 CUI「资料」老师入口一致 */
+  "本节资料": {
+    kind: "course-pick",
+    pickIntentPrompt: "看本节课资料",
+    pickIntentLabel: "想打开哪节课的资料？",
+  },
   /** 课中 · 🟢 线下：教室 IoT 主导能力，全部 course-pick 进对应课子 CUI */
   "进入教室助手": {
     kind: "course-pick",
@@ -210,22 +228,6 @@ const TEACHER_INTENTS: Record<string, EduMainChipMeta> = {
     kind: "course-pick",
     pickIntentPrompt: "生成下节课变式题包",
     pickIntentLabel: "想给哪节课生成变式题？",
-  },
-  "课中能做什么": {
-    kind: "direct",
-    directReply: {
-      headline: "上课时我就在你身边——不打断你的节奏，只在板书空隙提示。",
-      body: [
-        "上课时能帮你的事：出随堂题 / 自动分组讨论 / 节奏建议 / 板书拍照转文字 / 中英双语切换 / 私聊个别学员。",
-        "你专心讲，我自动看回答率、走神率、错题分布；超过阈值才打扰你一次。",
-      ],
-      systemNote: "（demo：进入主线物理课 · 课中阶段，下方 3 个 chip 都是上课时能直接用的功能）",
-      nextActions: [
-        { label: "出一道随堂题", prompt: "出一道随堂题", tone: "primary" },
-        { label: "发起 8 分钟分组讨论", prompt: "8 分钟分组讨论" },
-        { label: "看节奏建议", prompt: "调整节奏" },
-      ],
-    },
   },
   "群发家长通知": {
     kind: "direct",

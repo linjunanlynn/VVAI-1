@@ -4,6 +4,15 @@
  */
 export const DOCK_INLINE_SHORTCUT_LIMIT = 4
 
+/**
+ * 个别应用需要内联多于默认 4 条（设计稿要求所有快捷条目都直接可见）。
+ * 不在表中的 appId 仍走 `DOCK_INLINE_SHORTCUT_LIMIT`。
+ */
+export const DOCK_INLINE_SHORTCUT_LIMIT_BY_APP: Record<string, number> = {
+  /** 微盘：截图设计——空间列表 / 我的空间 / 最近 / 与我相关 / 传输中心 / 教育微盘空间，全部 6 条内联 */
+  disk: 6,
+}
+
 export const DOCK_APP_SHORTCUTS: Record<string, readonly string[]> = {
   /** 底部「教育」入口：机构 + 学校常见意图合集 */
   education: [
@@ -156,11 +165,21 @@ export const DOCK_APP_SHORTCUTS: Record<string, readonly string[]> = {
     "文档协作权限",
   ],
   disk: [
-    "上传文件",
-    "搜索微盘文件",
-    "创建共享文件夹",
-    "清理存储空间",
-    "文件夹权限设置",
+    /**
+     * 微盘 dock 内联菜单（按设计稿顺序：空间列表 / 我的空间 / 最近 / 与我相关 / 传输中心 / 教育微盘空间）
+     *
+     * 「教育微盘空间」对应原"教育微盘"特殊入口：点击直接出卡片（卡 1：列表卡），
+     * 由 `MainAIChatWindow` 经 `isEduDiskEntryCommand(text)` 识别后注入毕业帽图标 +
+     * `openEduDiskListCardInChat()`，**不**走 `handleSendMessage` 文本回复链路。
+     *
+     * 这 6 条都需要内联可见——用 `DOCK_INLINE_SHORTCUT_LIMIT_BY_APP.disk = 6` 覆盖默认 4 的预算。
+     */
+    "空间列表",
+    "我的空间",
+    "最近",
+    "与我相关",
+    "传输中心",
+    "教育微盘空间",
   ],
   mail: [
     "写邮件",
@@ -359,11 +378,12 @@ export const DOCK_APP_SHORTCUTS: Record<string, readonly string[]> = {
   ],
 }
 
-/** 条内直接可点的指令（前 N 条） */
+/** 条内直接可点的指令（前 N 条；可被 DOCK_INLINE_SHORTCUT_LIMIT_BY_APP 按应用覆盖） */
 export function getDockBarInlineShortcuts(appId: string): string[] {
   const list = DOCK_APP_SHORTCUTS[appId]
   if (!list?.length) return []
-  return [...list].slice(0, DOCK_INLINE_SHORTCUT_LIMIT)
+  const cap = DOCK_INLINE_SHORTCUT_LIMIT_BY_APP[appId] ?? DOCK_INLINE_SHORTCUT_LIMIT
+  return [...list].slice(0, cap)
 }
 
 /** 「智能指令推荐」抽屉内全部可发送指令（含条内已展示的，便于用户再次选用） */

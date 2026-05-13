@@ -21,8 +21,11 @@ import {
 export interface EduImInboxBannerProps {
   role: EduImTargetRole
   events: EduImEvent[]
-  /** 用于将"查看完整内容"指令打回主聊天区，触发 AI 回执 */
-  onOpenDetail: (command: string) => void
+  /**
+   * 用于将"查看完整内容"指令打回主聊天区，触发 AI 回执 / 业务卡。
+   * 第二参数透出原始事件，调用方可据此决定走"主对话内出卡"还是"跳子 CUI"。
+   */
+  onOpenDetail: (command: string, evt: EduImEvent) => void
   className?: string
 }
 
@@ -67,7 +70,7 @@ export function EduImInboxBanner({
               type="button"
               onClick={() => {
                 markEduImEventRead(evt.id)
-                onOpenDetail(buildOpenCommand(evt))
+                onOpenDetail(buildOpenCommand(evt), evt)
               }}
               className={cn(
                 "group flex w-full items-center gap-[var(--space-250)] rounded-[var(--radius-md)] border px-[var(--space-300)] py-[var(--space-200)] text-left transition-colors",

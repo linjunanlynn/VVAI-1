@@ -28,8 +28,15 @@ export type EduImEventType =
   | "teacher-private-chat" // 教师 · 私聊学员 → 学生端
   | "student-leave-request" // 学生 · 紧急请假 → 教师端
   | "parent-leave-request" // 家长 · 代孩子请假 → 教师端
+  | "teacher-leave-notice" // 教师代登记请假 → 通知家长
   | "series-reschedule-notify" // 教师在系列课内调课 → 通知家长 + 学生
   | "series-leave-confirmed" // 学生 / 家长在系列课内请假 → 通知教师（demo 自动确认）
+  | "homework-assigned-student" // 教师发布作业 → 学生（仅题目）
+  | "homework-assigned-parent" // 教师发布作业 → 家长（题+答案+解析）
+  | "homework-submitted-teacher" // 学生一键批改完成 → 老师
+  | "homework-result-student" // 老师 / 系统批改结果 → 学生
+  | "homework-appeal-teacher" // 学生错题申诉 → 老师
+  | "homework-anomaly-teacher" // 反作弊异常 → 老师（私聊）
 
 /** 事件目标侧（接收方所属身份场景） */
 export type EduImTargetRole = "teacher" | "student" | "parent"
@@ -51,6 +58,14 @@ export interface EduImEvent {
   /** 是否已读（消费方标记） */
   read: boolean
   createdAt: number
+  /**
+   * 关联课次（可选）：
+   * - 课后报告 / 系列调课 / 系列请假等"事件本身就锚在某节课"的场景由发起方填入
+   * - 用于消费方点开消息时直接定位到对应课次卡（如学生/家长侧"风采报告"卡）
+   */
+  lessonId?: string
+  /** 关联课次标题，用于消费方卡内 title 展示 */
+  lessonTitle?: string
 }
 
 interface BusState {
@@ -270,6 +285,77 @@ export const EDU_IM_PRESETS = {
       conversationTitle: "李爸爸（李小明监护人）",
       preview: `代请假已确认：${input.seriesName} · ${input.lessonLabel}`,
       studentName: "李小明",
+    }),
+  /* ============================================================
+   * 作业闭环（与 PRD-作业闭环-子CUI详细方案.md v1.1 一一对应）
+   *
+   * 共 6 条 preset（其余如 ta-grading-pending / ta-grading-confirmed
+   * 复用现有的"老师本地通知"，不需要进 IM 总线）：
+   * - homeworkAssignedToStudent / Parent：发布作业 → 给学生（只题）+ 家长（题+答案+解析）
+   * - homeworkSubmittedToTeacher：学生「一键批改」→ 通知老师
+   * - homeworkResultToStudent：老师改完 / 系统自动批完 → 通知学生
+   * - homeworkAppealToTeacher：学生对错判提申诉 → 通知老师
+   * - homeworkAnomalyToTeacher：异常检测（如答案与家长材料雷同） → 单向私聊老师
+   * ============================================================ */
+  homeworkAssignedToStudent: (input: { title: string; deadlineLabel?: string }) =>
+    pushEduImEvent({
+      type: "homework-assigned-student",
+      targetRole: "student",
+      fromName: "王老师（物理）",
+      toName: "林小安",
+      conversationTitle: "王老师（物理）",
+      preview: `${input.title}：${input.deadlineLabel ?? "今晚 22:00"} 前完成；做完点"一键批改"。`,
+      studentName: "林小安",
+    }),
+  homeworkAssignedToParent: (input: { title: string; deadlineLabel?: string }) =>
+    pushEduImEvent({
+      type: "homework-assigned-parent",
+      targetRole: "parent",
+      fromName: "王老师（物理）",
+      toName: "林爸爸（林小安监护人）",
+      conversationTitle: "王老师（物理）",
+      preview: `${input.title}：附辅导材料（题目+答案+解析）；陪练但不要替答。`,
+      studentName: "林小安",
+    }),
+  homeworkSubmittedToTeacher: (input: { title: string; studentName: string; score: number }) =>
+    pushEduImEvent({
+      type: "homework-submitted-teacher",
+      targetRole: "teacher",
+      fromName: input.studentName,
+      toName: "王老师",
+      conversationTitle: `${input.studentName}（学员）`,
+      preview: `${input.title}：${input.studentName} 已完成 · 系统自动批改 ${input.score} 分。`,
+      studentName: input.studentName,
+    }),
+  homeworkResultToStudent: (input: { title: string; score: number }) =>
+    pushEduImEvent({
+      type: "homework-result-student",
+      targetRole: "student",
+      fromName: "王老师（物理）",
+      toName: "林小安",
+      conversationTitle: "王老师（物理）",
+      preview: `${input.title}：批改完成，得分 ${input.score} 分；错题可申诉。`,
+      studentName: "林小安",
+    }),
+  homeworkAppealToTeacher: (input: { title: string; studentName: string; reason: string }) =>
+    pushEduImEvent({
+      type: "homework-appeal-teacher",
+      targetRole: "teacher",
+      fromName: input.studentName,
+      toName: "王老师",
+      conversationTitle: `${input.studentName}（学员）`,
+      preview: `${input.title}：提了一条申诉 —— "${input.reason.slice(0, 24)}${input.reason.length > 24 ? "…" : ""}"`,
+      studentName: input.studentName,
+    }),
+  homeworkAnomalyToTeacher: (input: { title: string; studentName: string; reason: string }) =>
+    pushEduImEvent({
+      type: "homework-anomaly-teacher",
+      targetRole: "teacher",
+      fromName: "VV AI · 反作弊",
+      toName: "王老师",
+      conversationTitle: "VV AI · 学情风控",
+      preview: `${input.title}：${input.studentName} 检测到 ${input.reason}，建议人工复核。`,
+      studentName: input.studentName,
     }),
 } as const
 

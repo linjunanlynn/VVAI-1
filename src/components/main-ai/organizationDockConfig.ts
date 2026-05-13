@@ -156,7 +156,7 @@ export const MERGED_EDU_PORTAL_APPS: PortalApp[] = [
  *   · 课表日历 → 周/月日历视图（沿用现 schedule "week" 卡作为日历态）
  * ========================================================= */
 
-/** 任课教师（场景 6）：课程管理 / 商品管理 / 成员管理 / 财务管理 */
+/** 任课教师（场景 6）：课程管理 / 教学管理 / 商品管理 / 成员管理 / 财务管理 */
 export const TEACHER_PORTAL_APPS: PortalApp[] = [
   {
     id: "edu_course_mgmt",
@@ -171,6 +171,17 @@ export const TEACHER_PORTAL_APPS: PortalApp[] = [
     ],
   },
   {
+    id: "edu_teaching_mgmt",
+    name: "教学管理",
+    imageSrc: educationIcon,
+    menu: [
+      { id: "tm_materials", name: "资料", iconKey: "fulfillment" },
+      { id: "tm_attendance", name: "考勤", iconKey: "fulfillment" },
+      { id: "tm_homework", name: "作业", iconKey: "fulfillment" },
+      { id: "tm_review", name: "点评风采", iconKey: "fulfillment" },
+    ],
+  },
+  {
     id: "edu_goods_mgmt",
     name: "商品管理",
     imageSrc: goodsIcon,
@@ -203,7 +214,7 @@ export const TEACHER_PORTAL_APPS: PortalApp[] = [
   },
 ]
 
-/** 机构管理者（场景 9）：与老师统一为课程/商品/成员/财务四类 */
+/** 机构管理者（场景 9）：与老师统一为课程 / 教学 / 商品 / 成员 / 财务五类 */
 export const ADMIN_PORTAL_APPS: PortalApp[] = [
   {
     id: "edu_course_mgmt",
@@ -218,6 +229,17 @@ export const ADMIN_PORTAL_APPS: PortalApp[] = [
     ],
   },
   {
+    id: "edu_teaching_mgmt",
+    name: "教学管理",
+    imageSrc: educationIcon,
+    menu: [
+      { id: "tm_materials", name: "资料", iconKey: "fulfillment" },
+      { id: "tm_attendance", name: "考勤", iconKey: "fulfillment" },
+      { id: "tm_homework", name: "作业", iconKey: "fulfillment" },
+      { id: "tm_review", name: "点评风采", iconKey: "fulfillment" },
+    ],
+  },
+  {
     id: "edu_goods_mgmt",
     name: "商品管理",
     imageSrc: goodsIcon,
@@ -250,7 +272,7 @@ export const ADMIN_PORTAL_APPS: PortalApp[] = [
   },
 ]
 
-/** 学员（场景 7）：课程管理 / 商品管理 / 成员管理 / 奖励管理 */
+/** 学员（场景 7）：课程管理 / 教学管理 / 商品管理 / 成员管理 / 奖励管理 */
 export const STUDENT_PORTAL_APPS: PortalApp[] = [
   {
     id: "student_course_mgmt",
@@ -260,6 +282,17 @@ export const STUDENT_PORTAL_APPS: PortalApp[] = [
       { id: "ss_today", name: "今日课表", iconKey: "schedule" },
       { id: "sc_fulfillment", name: "课程履约", iconKey: "fulfillment" },
       { id: "sc_leave", name: "学生请假", iconKey: "schedule" },
+    ],
+  },
+  {
+    id: "student_teaching_mgmt",
+    name: "教学管理",
+    imageSrc: educationIcon,
+    menu: [
+      { id: "tm_materials", name: "资料", iconKey: "fulfillment" },
+      { id: "tm_attendance", name: "考勤", iconKey: "fulfillment" },
+      { id: "tm_homework", name: "作业", iconKey: "fulfillment" },
+      { id: "tm_review", name: "报告风采", iconKey: "fulfillment" },
     ],
   },
   {
@@ -288,7 +321,7 @@ export const STUDENT_PORTAL_APPS: PortalApp[] = [
   },
 ]
 
-/** 家长（场景 8）：与学员同构（课程管理 / 商品管理 / 成员管理 / 奖励管理） */
+/** 家长（场景 8）：与学员同构（课程管理 / 教学管理 / 商品管理 / 成员管理 / 奖励管理） */
 export const PARENT_PORTAL_APPS: PortalApp[] = [
   {
     id: "parent_course_mgmt",
@@ -298,6 +331,17 @@ export const PARENT_PORTAL_APPS: PortalApp[] = [
       { id: "ps_today", name: "今日课表", iconKey: "schedule" },
       { id: "pc_fulfillment", name: "课程履约", iconKey: "fulfillment" },
       { id: "pc_student_leave", name: "学生请假", iconKey: "schedule" },
+    ],
+  },
+  {
+    id: "parent_teaching_mgmt",
+    name: "教学管理",
+    imageSrc: educationIcon,
+    menu: [
+      { id: "tm_materials", name: "资料", iconKey: "fulfillment" },
+      { id: "tm_attendance", name: "考勤", iconKey: "fulfillment" },
+      { id: "tm_homework", name: "作业", iconKey: "fulfillment" },
+      { id: "tm_review", name: "报告风采", iconKey: "fulfillment" },
     ],
   },
   {

@@ -66,7 +66,13 @@ const OFFLINE_IN_CHIPS: Record<EduLessonAttendingRole, AiClassroomReplyAction[]>
 const WELCOME_CHIPS: ChipMatrix = {
   teacher: {
     pre: [
-      { label: "开始备课检查", prompt: "开始备课检查清单", tone: "primary" },
+      /**
+       * label / prompt 与底部应用条「备课」chip 完全一致：
+       * 由 `AiClassroomSideConversationPanel.handleRecommendedPrompt` 内对 `开始备课` 的早期拦截
+       * push `RENDER_TEACHER_LESSON_PREP_READY_CARD_MARKER` → 渲染备课就绪卡（学员名单 + 课件设备清单），
+       * 与点击底部应用条的「备课」按钮得到同一张卡片，避免课前欢迎语下方再额外出现一张老版「备课草稿」卡。
+       */
+      { label: "开始备课", prompt: "开始备课", tone: "primary" },
       { label: "推送预习给学生", prompt: "推送预习包给学生" },
       { label: "处理请假调课审批", prompt: "处理请假调课审批" },
     ],
@@ -77,8 +83,14 @@ const WELCOME_CHIPS: ChipMatrix = {
     ],
     post: [
       { label: "布置今晚作业", prompt: "布置今晚作业", tone: "primary" },
-      { label: "一键群发学情报告", prompt: "一键发送给家长" },
-      { label: "发送课堂照片给家长", prompt: "发送课堂风采给家长" },
+      /**
+       * 整合原「一键群发学情报告 / 发送课堂照片给家长」两条 chip：
+       * 这两步在新「风采点评 → 风采报告」闭环里属于同一个动作（AI 已自动汇总学情 + 选好风采素材，
+       * 老师只需复审与一键发送），不应再让老师在欢迎区先做"分桶选择"。
+       * 点击 → 由 `AiClassroomSideConversationPanel` 走 isReviewPrompt 命中，渲染 `LessonReviewCard`，
+       * 与底部应用条「风采点评」按钮、跨身份 IM banner 点击进入的卡片完全同源。
+       */
+      { label: "发送学员个性化报告风采", prompt: "发送学员个性化报告风采" },
     ],
   },
   student: {

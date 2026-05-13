@@ -54,6 +54,7 @@ import { AiClassroomSeriesOutlineDrawer } from "./AiClassroomSeriesOutlineDrawer
 import { EDU_IM_PRESETS } from "./eduImBus"
 import {
   AiClassroomSideConversationPanel,
+  type AiClassroomSidePanelOpenRequest,
   type AiClassroomSeriesContextForPanel,
 } from "./AiClassroomSideConversationPanel"
 import { DEMO_LESSON, getLessonRuntimeState } from "./aiClassroomLessonDemo"
@@ -69,6 +70,22 @@ import type { LessonDeliveryMode } from "./lessonDeliveryMode"
 export interface AiClassroomSeriesSidePanelOpenRequest {
   /** 触发来源（仅用于 demo 内追踪） */
   source?: "schedule" | "im-banner"
+  /**
+   * 指定打开后定位到的 outline 序号（1-based，沿用 outline.index）。
+   *
+   * 主要使用场景：从「课程履约」卡片点某一行 occurrence 进来时，
+   * 父级把该 occurrence 的 lessonNumber 透下来，覆盖默认的
+   * `decideInitialActiveOutlineIndex`，让用户看到的就是他刚点的那节。
+   *
+   * 不传 = 走默认定位（结课系列回最后节、未开课系列定首节、进行中按"上节是否完成"等规则）。
+   */
+  targetOutlineIndex?: number
+  /** 进入系列后自动执行的命令（例如：风采点评 / 看本节课资料） */
+  command?: string
+  /** 命中具体 skill 时可透传 */
+  skillId?: string
+  /** 与单课 panel 保持同语义：open-only 仅开容器，skill 会执行命令 */
+  kind?: "open-only" | "skill"
 }
 
 function addMinutesToClock(clock: string, minutes: number): string | null {
@@ -129,6 +146,11 @@ export interface AiClassroomSeriesSideConversationPanelProps {
    * 仅当当前 active outline 是主线节时单课 panel 内才会出现入口。
    */
   onOpenLiveClass?: () => void
+  /**
+   * 当前所属教育空间（必填，向 inline 单课 panel 透传 → 资料卡寻址 store）。
+   */
+  spaceOrgId: string
+  spaceScenario?: string
 }
 
 export function AiClassroomSeriesSideConversationPanel({
@@ -144,7 +166,11 @@ export function AiClassroomSeriesSideConversationPanel({
   onStageChange,
   deliveryMode = "online",
   onOpenLiveClass,
+  spaceOrgId,
+  spaceScenario,
 }: AiClassroomSeriesSideConversationPanelProps) {
+  const [embeddedPendingRequest, setEmbeddedPendingRequest] =
+    React.useState<AiClassroomSidePanelOpenRequest | null>(null)
   /* --------------------------
    * 智能定位：每次 series / role / stage 变化都重新计算
    * -------------------------- */
@@ -156,6 +182,20 @@ export function AiClassroomSeriesSideConversationPanel({
   React.useEffect(() => {
     setActiveOutlineIndex(initialActiveIndex)
   }, [initialActiveIndex])
+
+  /**
+   * 来自履约卡 / 待办带等"指定第 N 节"的入口：
+   * pendingRequest.targetOutlineIndex 一旦携带，覆盖默认定位。
+   * 校验 outline 必须存在（series 节数变动场景下兜底用 nearest 1 节）。
+   */
+  React.useEffect(() => {
+    const target = pendingRequest?.targetOutlineIndex
+    if (typeof target !== "number") return
+    const found = series.outlines.find((o) => o.index === target)
+    if (found) {
+      setActiveOutlineIndex(found.index)
+    }
+  }, [pendingRequest, series])
 
   const activeOutline = React.useMemo(
     () => series.outlines.find((o) => o.index === activeOutlineIndex) ?? series.outlines[0],
@@ -183,6 +223,16 @@ export function AiClassroomSeriesSideConversationPanel({
   /** 消费外部 pendingRequest（暂只用作激活 panel；定位由 useMemo 已自动计算） */
   React.useEffect(() => {
     if (!pendingRequest) return
+    if (pendingRequest.command) {
+      setEmbeddedPendingRequest({
+        command: pendingRequest.command,
+        skillId: pendingRequest.skillId,
+        kind: pendingRequest.kind ?? "skill",
+        source: pendingRequest.source === "im-banner" ? "im-banner" : "user",
+      })
+    } else {
+      setEmbeddedPendingRequest(null)
+    }
     onConsumePendingRequest()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingRequest])
@@ -423,7 +473,7 @@ export function AiClassroomSeriesSideConversationPanel({
          * - 整条作为 button 直接以 header 边框接到顶 bar 下方，无外层灰色 wrapper；
          * - 右侧仅保留一个展开/收起 chevron icon，不再带文字与列表 icon；
          * - 整条可点（与 chevron 同步切换 drawer）。
-         * - 「进入 AI 互动课堂」CTA 已统一下沉至子 CUI 底部应用条「在线教室」按钮，
+         * - 「进入 AI 互动课堂」CTA 已统一下沉至子 CUI 底部应用条「在线课堂」按钮，
          *   不在课次条右侧重复出现，避免上下两处入口重复。
          */}
         <div
@@ -469,7 +519,7 @@ export function AiClassroomSeriesSideConversationPanel({
             ) : null}
           </span>
 
-          {/* Right · 展开/收起 chevron icon（live CTA 已下沉至底部「在线教室」按钮） */}
+          {/* Right · 展开/收起 chevron icon（live CTA 已下沉至底部「在线课堂」按钮） */}
           <span className="flex shrink-0 items-center gap-[var(--space-200)]">
             {drawerOpen ? (
               <ChevronUp
@@ -518,18 +568,25 @@ export function AiClassroomSeriesSideConversationPanel({
           deliveryMode={deliveryMode}
           lessonId={threadKey}
           lessonTitle={activeOutline.title}
-          pendingRequest={null}
-          onConsumePendingRequest={() => {}}
+          pendingRequest={embeddedPendingRequest}
+          onConsumePendingRequest={() => setEmbeddedPendingRequest(null)}
           botAvatarSrc={botAvatarSrc}
           userAvatarSrc={userAvatarSrc}
           userDisplayName={userDisplayName}
           onClose={onClose}
           onStageChange={isMainOutline ? onStageChange : undefined}
-          onOpenLiveClass={isMainOutline ? onOpenLiveClass : undefined}
+          /**
+           * 课中阶段「在线课堂」chip 对所有 outline 都开放：
+           * 不再仅限主线节，让用户新建课程 / 已结课 / 未开课系列在「课中」演示阶段也能进直播浮层。
+           * 实际浮层数据由父级 `openAiClassroomLiveWindow` 统一兜底（demo 时退回 DEMO_LESSON 即可）。
+           */
+          onOpenLiveClass={onOpenLiveClass}
           embedded
           suppressTeacherControlStrip
           suppressChecklist={!isMainOutline}
           seriesContext={seriesContextValue}
+          spaceOrgId={spaceOrgId}
+          spaceScenario={spaceScenario}
         />
       </div>
     </div>
