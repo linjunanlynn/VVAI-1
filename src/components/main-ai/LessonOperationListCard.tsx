@@ -1413,56 +1413,84 @@ function HomeworkRowBody({
 }) {
   const snap = useLessonHomeworkSnapshot(row.lessonKey)
   const published = snap.homeworks.filter((hw) => hw.publishedAt && !hw.withdrawnAt)
-  const latest: LessonHomework | null = published[0] ?? null
+  const isTeacherOrAdmin = role === "teacher" || role === "admin"
+  const visibleHomeworks = isTeacherOrAdmin
+    ? snap.homeworks.filter((hw) => !hw.withdrawnAt)
+    : published
 
-  /** 老师 / 管理者：跨多份作业聚合（demo 简化为最近一份） */
-  const teacherStats = latest ? deriveGradingStats(latest) : null
+  /** 老师 / 管理者：跨多份已发布作业聚合 */
+  const teacherStats = published.length > 0 ? aggregateHomeworkStats(published) : null
 
-  /** 学生 / 家长：自己孩子那份 */
+  /** 学生 / 家长：自己孩子那份（按每份作业单独计算） */
   const selfId = getSelfStudentIdForRole()
-  const selfSub = latest?.submissions.find((s) => s.studentId === selfId) ?? null
-  const selfStatus = latest && selfSub ? deriveSubmissionStatus(latest, selfSub) : null
-  const selfScore = selfSub?.teacherFinal?.score ?? selfSub?.autoReview?.score
 
-  const summary = (() => {
-    if (!latest) {
-      if (role === "student") return "今晚作业还未派发，点击整条课程看老师布置"
-      if (role === "parent") return "今晚作业未开始，可设家庭日历提醒"
-      return "暂未派发；点击整条课程起草本节课作业"
-    }
-    if (role === "student") {
-      if (!selfSub) return `《${latest.title}》派发完成，但你不在派发列表`
-      if (selfStatus === "teacher-confirmed")
-        return `《${latest.title}》老师已复核 · 终评 ${selfScore}`
-      if (selfStatus === "submitted")
-        return `《${latest.title}》已批改 · 得分 ${selfScore}`
-      if (selfStatus === "appealed") return `《${latest.title}》申诉处理中`
-      if (selfStatus === "in-progress") return `《${latest.title}》作答中`
-      return `《${latest.title}》等你开始`
-    }
-    if (role === "parent") {
-      if (!selfSub) return `《${latest.title}》已派发，但孩子不在派发列表`
-      if (selfStatus === "teacher-confirmed")
-        return `《${latest.title}》老师已复核 · 终评 ${selfScore}`
-      if (selfStatus === "submitted")
-        return `《${latest.title}》孩子已批改 · 得分 ${selfScore}`
-      if (selfStatus === "in-progress") return `《${latest.title}》孩子作答中`
-      return `《${latest.title}》孩子还没开始`
-    }
-    /** teacher / admin */
-    const t = teacherStats!
-    return `《${latest.title}》已交 ${t.submitted}/${t.total} · 待复核 ${t.pendingReview} · 正确率 ${t.accuracy}%`
-  })()
+  const emptySummary =
+    role === "student"
+      ? "今晚作业还未派发，点击整条课程看老师布置"
+      : role === "parent"
+        ? "今晚作业未开始，可设家庭日历提醒"
+        : "暂未派发；点击整条课程起草本节课作业"
 
   return (
     <div className="flex flex-col gap-[var(--space-200)]">
-      <div className="flex flex-wrap items-center gap-[var(--space-200)]">
+      {visibleHomeworks.length > 0 ? (
+        <div className="flex flex-col gap-[var(--space-150)]">
+          {visibleHomeworks.map((hw) => {
+            const isPublished = Boolean(hw.publishedAt && !hw.withdrawnAt)
+            const stats = deriveGradingStats(hw)
+            const selfSub = hw.submissions.find((s) => s.studentId === selfId) ?? null
+            const selfStatus = selfSub ? deriveSubmissionStatus(hw, selfSub) : null
+            const selfScore = selfSub?.teacherFinal?.score ?? selfSub?.autoReview?.score
+            const detail = homeworkRowDetail({
+              hw,
+              role,
+              stats,
+              selfSubExists: Boolean(selfSub),
+              selfStatus,
+              selfScore,
+              isPublished,
+            })
+
+            return (
+              <div
+                key={hw.id}
+                className="rounded-[var(--radius-md)] border border-border bg-bg-secondary/30 px-[var(--space-250)] py-[var(--space-200)]"
+              >
+                <div className="flex min-w-0 flex-wrap items-center gap-[var(--space-150)]">
+                  <span className="inline-flex shrink-0 rounded-full bg-[var(--color-primary)]/10 px-[var(--space-150)] py-[1px] text-[length:var(--font-size-xs)] font-[var(--font-weight-medium)] text-[var(--color-primary)]">
+                    {homeworkStageLabel(hw.stage)}作业
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[length:var(--font-size-sm)] font-[var(--font-weight-semibold)] text-text">
+                    《{hw.title}》
+                  </span>
+                  {isTeacherOrAdmin ? (
+                    <span
+                      className={cn(
+                        "inline-flex shrink-0 rounded-[var(--radius-sm)] border px-[var(--space-150)] py-[1px] text-[length:var(--font-size-xs)] font-[var(--font-weight-medium)]",
+                        isPublished
+                          ? "border-[var(--color-success)]/25 bg-[var(--color-success)]/8 text-[var(--color-success)]"
+                          : "border-[var(--color-warning,#f59e0b)]/25 bg-[var(--color-warning,#f59e0b)]/8 text-[var(--color-warning,#f59e0b)]",
+                      )}
+                    >
+                      {isPublished ? "已发布" : "草稿"}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-[var(--space-100)] flex items-center gap-[var(--space-150)] text-[length:var(--font-size-xs)] text-text-tertiary">
+                  <ClipboardCheck className="h-3.5 w-3.5 shrink-0" />
+                  <span>{detail}</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
         <div className="inline-flex items-center gap-[var(--space-150)] text-[length:var(--font-size-sm)] text-text-secondary">
           <ClipboardCheck className="h-4 w-4 text-text-tertiary" />
-          <span>{summary}</span>
+          <span>{emptySummary}</span>
         </div>
-      </div>
-      {(role === "teacher" || role === "admin") && teacherStats ? (
+      )}
+      {isTeacherOrAdmin && teacherStats ? (
         <div className="flex flex-wrap items-stretch gap-[var(--space-150)]">
           <AttendanceStat label="应交" value={`${teacherStats.total} 份`} />
           <AttendanceStat
@@ -1484,6 +1512,62 @@ function HomeworkRowBody({
       ) : null}
     </div>
   )
+}
+
+function homeworkStageLabel(stage: LessonHomework["stage"]): string {
+  return stage === "pre" ? "课前" : stage === "in" ? "课中" : "课后"
+}
+
+function aggregateHomeworkStats(homeworks: LessonHomework[]) {
+  const stats = homeworks.map((hw) => deriveGradingStats(hw))
+  const submitted = stats.reduce((sum, item) => sum + item.submitted, 0)
+  const total = stats.reduce((sum, item) => sum + item.total, 0)
+  const pendingReview = stats.reduce((sum, item) => sum + item.pendingReview, 0)
+  const accuracySum = stats.reduce(
+    (sum, item) => sum + item.accuracy * item.submitted,
+    0,
+  )
+  return {
+    total,
+    submitted,
+    pendingReview,
+    accuracy: submitted > 0 ? Math.round(accuracySum / submitted) : 0,
+  }
+}
+
+function homeworkRowDetail({
+  hw,
+  role,
+  stats,
+  selfSubExists,
+  selfStatus,
+  selfScore,
+  isPublished,
+}: {
+  hw: LessonHomework
+  role: EduSceneRole
+  stats: ReturnType<typeof deriveGradingStats>
+  selfSubExists: boolean
+  selfStatus: ReturnType<typeof deriveSubmissionStatus> | null
+  selfScore: number | undefined
+  isPublished: boolean
+}): string {
+  if (role === "teacher" || role === "admin") {
+    if (!isPublished) return `草稿 · 待发布 · 目标 ${hw.submissions.length} 人`
+    return `已交 ${stats.submitted}/${stats.total} · 待复核 ${stats.pendingReview} · 正确率 ${stats.accuracy}%`
+  }
+  if (!selfSubExists) return "已派发，但不在派发列表"
+  if (role === "student") {
+    if (selfStatus === "teacher-confirmed") return `老师已复核 · 终评 ${selfScore}`
+    if (selfStatus === "submitted") return `已批改 · 得分 ${selfScore}`
+    if (selfStatus === "appealed") return "申诉处理中"
+    if (selfStatus === "in-progress") return "作答中"
+    return "等你开始"
+  }
+  if (selfStatus === "teacher-confirmed") return `老师已复核 · 终评 ${selfScore}`
+  if (selfStatus === "submitted") return `孩子已批改 · 得分 ${selfScore}`
+  if (selfStatus === "in-progress") return "孩子作答中"
+  return "孩子还没开始"
 }
 
 /* ============================================================
